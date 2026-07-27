@@ -28,13 +28,20 @@ state, or new copy in the footer/help.
 | Go (source of truth) | Browser port |
 |---|---|
 | `internal/tui/update.go` → `handleKey` | `docs/assets/demo.js` → `handleKey` |
-| `internal/tui/view.go` → `syncGlyph`, `renderRow`, `tabBar`, `window`, `centerBlock` | `demo.js` → same names, ported deliberately |
+| `internal/tui/view.go` → `syncGlyph`, `renderRow`, `tabBar`, `overlayTabs`, `overlayHead`, `window`, `centerBlock` | `demo.js` → same names, ported deliberately |
 | `internal/tui/theme.go` → `themeList` | `docs/assets/site.css` → `:root[data-theme=…]` blocks |
 | `internal/tui/settings.go` → `settingRows` | `demo.js` → `settingRows` |
 | `internal/discover` → repo/script discovery | `demo.js` → the `REPOS` / `SCRIPTS` fixtures |
 | `README.md` key table | `docs/index.html` → the Keys section |
 
 Ported functions keep their Go names on purpose — grep the name in both files.
+
+**There are FOUR mirrors of the key table, not two.** A key change has to land in
+all of them or the product and the site disagree:
+`internal/tui/view.go` → `keysBody` (the in-app reference), `README.md`,
+`docs/index.html` → the Keys section, and **`docs/llms.txt`** — which is
+git-tracked and published from `docs/` alongside the page, and is the one people
+forget.
 
 ### Rules the port must keep
 

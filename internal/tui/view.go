@@ -377,6 +377,34 @@ func tabBar(tabs []struct {
 	return strings.Join(out, styleDim.Render("│"))
 }
 
+// overlayTabs is the ? overlay's own tab bar. It borrows tabBar's visual language
+// — reverse-video active chip, dim "│" joiner — with two deliberate differences.
+// The faces carry no number, because unlike the other slots they have no numeric
+// shortcut. And the inactive face is NOT dimmed: with , retired it is the only
+// signpost to Settings, and --dim is the palette's lowest-contrast colour.
+func overlayTabs(onKeys bool) string {
+	active := lipgloss.NewStyle().Reverse(true).Bold(true)
+	keys, settings := " Keys ", " Settings "
+	if onKeys {
+		keys = active.Render(keys)
+	} else {
+		settings = active.Render(settings)
+	}
+	return keys + styleDim.Render("│") + settings
+}
+
+// overlayHead is the first two lines both overlay faces share: the tab bar, the
+// switch hint, and the close hint. It REPLACES the old per-face title line rather
+// than adding a row — at the documented 80x20 minimum the body already fills the
+// box exactly, so an extra line would clip the footer. Keeping "esc close" up here
+// also means it survives the height clamp on the un-windowed keys face.
+func (m Model) overlayHead() []string {
+	return []string{
+		overlayTabs(m.showKeys) + styleDim.Render("   tab · [ ] switch · esc close"),
+		"",
+	}
+}
+
 // topTabs is the tab bar for the top-right slot: Branches (3) and PRs (4).
 func (m Model) topTabs() string {
 	return tabBar([]struct {
@@ -691,7 +719,7 @@ func (m Model) footer() string {
 		}
 	}
 	return styleDim.Render(
-		enter + " | z zoom | g graph | n news | t tags | F changed | s sync | p push | d/D discard | o open | r refetch | ? keys | , settings | q quit")
+		enter + " | z zoom | g graph | n news | t tags | F changed | s sync | p push | d/D discard | o open | r refetch | ? help | q quit")
 }
 
 func (m Model) statusOrFilterLine() string {
@@ -707,10 +735,52 @@ func (m Model) statusOrFilterLine() string {
 // helpView renders the full-screen overlay: the Settings radio-list, or the
 // keybindings + status reference when toggled with tab.
 func (m Model) helpView() string {
-	if m.showKeys {
-		return m.overlayBox(m.keysBody())
+	// Render BOTH faces and pad the visible one out to the footprint they share.
+	// overlayBox centres the block, so without this the wider/taller keys face
+	// moved the whole overlay — including the tab bar you just pressed tab on.
+	keys, settings := m.keysBody(), m.settingsBody()
+	w, h := blockSize(keys)
+	if sw, sh := blockSize(settings); true {
+		if sw > w {
+			w = sw
+		}
+		if sh > h {
+			h = sh
+		}
 	}
-	return m.overlayBox(m.settingsBody())
+	body := settings
+	if m.showKeys {
+		body = keys
+	}
+	return m.overlayBox(padBlock(body, w, h))
+}
+
+// blockSize is the widest line and the line count of an already-rendered block.
+func blockSize(s string) (w, h int) {
+	lines := strings.Split(s, "\n")
+	for _, ln := range lines {
+		if x := lipgloss.Width(ln); x > w {
+			w = x
+		}
+	}
+	return w, len(lines)
+}
+
+// padBlock grows a block to w x h with trailing spaces and blank lines, so two
+// blocks of different natural size occupy an identical footprint. It only ever
+// pads — a block already bigger than w x h is returned untouched, so this can
+// never clip content.
+func padBlock(s string, w, h int) string {
+	lines := strings.Split(s, "\n")
+	for i, ln := range lines {
+		if d := w - lipgloss.Width(ln); d > 0 {
+			lines[i] = ln + strings.Repeat(" ", d)
+		}
+	}
+	for len(lines) < h {
+		lines = append(lines, strings.Repeat(" ", w))
+	}
+	return strings.Join(lines, "\n")
 }
 
 // overlayBox wraps overlay content in a full-screen focused panel, centred both
@@ -859,13 +929,14 @@ func (m Model) settingsBody() string {
 		}
 	}
 	// Window both columns together (they share start/end since JoinHorizontal
-	// aligns them at the top). A no-op at every supported size; only bites if the
-	// list grows.
+	// aligns them at the top). This is NOT a no-op: the left column is already 17
+	// rows against avail 14 at the documented 80x20 minimum, so the window is load
+	// bearing at the smallest supported size.
 	th := m.height
 	if th <= 0 {
 		th = minTermH
 	}
-	avail := (th - 2) - 4 // box inner height minus title, blank, blank, footer
+	avail := (th - 2) - 4 // box inner height minus tab bar, blank, blank, footer
 	if avail < 1 {
 		avail = 1
 	}
@@ -895,18 +966,78 @@ func (m Model) settingsBody() string {
 	}
 	cols := lipgloss.JoinHorizontal(lipgloss.Top, strings.Join(left, "\n"), strings.Join(right, "\n"))
 
-	body := []string{styleTitle.Render("manygit — settings") + styleDim.Render("   (,)"), ""}
+	body := m.overlayHead()
 	body = append(body, strings.Split(cols, "\n")...)
-	body = append(body, "", styleDim.Render("j/k move · enter select · tab keys · esc close"))
+	body = append(body, "", styleDim.Render("j/k move · enter select"))
 	// Left-join first so it pads every line to the block width — the title and
 	// footer then share a straight left edge with the columns instead of overlayBox
 	// centring each on its own.
 	return lipgloss.JoinVertical(lipgloss.Left, body...)
 }
 
-// keysBody is the two-column keybinding + status-legend reference (two columns so
-// it fits shorter terminals).
+// keysAvail is how many column rows the keys face can show: the box inner height
+// minus its two head lines. settingsBody's avail subtracts 4 because it also has a
+// blank + footer, so both faces come out the same total height.
+func (m Model) keysAvail() int {
+	th := m.height
+	if th <= 0 {
+		th = minTermH
+	}
+	return max(1, (th-2)-2)
+}
+
+// keysRowCount is the number of column rows on the keys face — the scroll clamp
+// needs it, and it must agree with keysBody's own padding, so both read it here.
+func (m Model) keysRowCount() int {
+	left, right := m.keysColumns()
+	return max(len(left), len(right))
+}
+
+// keysBody is the two-column keybinding + status-legend reference, windowed by
+// keysOffset. It outgrows a short terminal (28 rows against 16 at 80x20), and used
+// to be silently clipped there — the last rows were simply unreachable.
 func (m Model) keysBody() string {
+	left, right := m.keysColumns()
+	n := max(len(left), len(right))
+	for len(left) < n {
+		left = append(left, "")
+	}
+	for len(right) < n {
+		right = append(right, "")
+	}
+	avail := m.keysAvail()
+	off := clampInt(m.keysOffset, 0, max(0, n-avail))
+	start, end := window(n, off+avail-1, avail)
+	left, right = left[start:end], right[start:end]
+
+	tw := m.width
+	if tw <= 0 {
+		tw = minTermW
+	}
+	// Clip each column to its width budget (ANSI-aware) so neither can wrap and
+	// break alignment — leftW + rightW == the overlay's inner content width, so
+	// the joined row never exceeds it (which panelStyle would otherwise wrap).
+	// Left content is clipped to leftW-gutter then padded to leftW, so there's
+	// always a gap before the right column even when a left line is truncated.
+	const gutter = 2
+	leftW := (tw - 4) / 2
+	rightW := (tw - 4) - leftW
+	leftBlock := make([]string, len(left))
+	for i, ln := range left {
+		c := lipgloss.NewStyle().MaxWidth(leftW - gutter).Render(ln)
+		leftBlock[i] = c + strings.Repeat(" ", max(0, leftW-lipgloss.Width(c)))
+	}
+	rightBlock := make([]string, len(right))
+	for i, ln := range right {
+		rightBlock[i] = lipgloss.NewStyle().MaxWidth(rightW).Render(ln)
+	}
+	cols := lipgloss.JoinHorizontal(lipgloss.Top, strings.Join(leftBlock, "\n"), strings.Join(rightBlock, "\n"))
+	return strings.Join(m.overlayHead(), "\n") + "\n" + cols
+}
+
+// keysColumns builds the two reference columns. Split out from keysBody so the
+// scroll clamp can count the rows without rendering them.
+func (m Model) keysColumns() (leftCol, rightCol []string) {
 	kr := func(key, desc string) string {
 		// Width(10), not 8: lipgloss's Width HARD-WRAPS rather than overflowing, so
 		// any key wider than the column breaks across two lines mid-word. The
@@ -918,10 +1049,6 @@ func (m Model) keysBody() string {
 	up, down := "+", "-"
 	if m.cfg.UnicodeGlyphs() {
 		up, down = "↑", "↓"
-	}
-	head := []string{
-		styleTitle.Render("manygit — keybindings") + styleDim.Render("   (tab or , for settings · esc close)"),
-		"",
 	}
 	left := []string{
 		styleGroup.Render("Panels & navigation"),
@@ -963,9 +1090,10 @@ func (m Model) keysBody() string {
 		kr("o", "open the repo in your editor"),
 		"",
 		styleGroup.Render("This screen"),
-		kr("?", "this page"),
-		kr(",", "settings (themes, harness, depth)"),
-		kr("tab", "flip keys <-> settings"),
+		kr("?", "open / close this overlay"),
+		kr("tab / [ ]", "keys <-> settings"),
+		kr("j/k", "scroll this page"),
+		kr("esc", "close this overlay"),
 		kr("q", "quit manygit"),
 		"",
 		styleGroup.Render("Status column"),
@@ -978,29 +1106,7 @@ func (m Model) keysBody() string {
 		kr(styleDim.Render("no-remote"), "local-only repo (no remote configured)"),
 		kr(styleRed.Render("!"), "branch has no upstream, or error"),
 	}
-	tw := m.width
-	if tw <= 0 {
-		tw = minTermW
-	}
-	// Clip each column to its width budget (ANSI-aware) so neither can wrap and
-	// break alignment — leftW + rightW == the overlay's inner content width, so
-	// the joined row never exceeds it (which panelStyle would otherwise wrap).
-	// Left content is clipped to leftW-gutter then padded to leftW, so there's
-	// always a gap before the right column even when a left line is truncated.
-	const gutter = 2
-	leftW := (tw - 4) / 2
-	rightW := (tw - 4) - leftW
-	leftBlock := make([]string, len(left))
-	for i, ln := range left {
-		c := lipgloss.NewStyle().MaxWidth(leftW - gutter).Render(ln)
-		leftBlock[i] = c + strings.Repeat(" ", max(0, leftW-lipgloss.Width(c)))
-	}
-	rightBlock := make([]string, len(right))
-	for i, ln := range right {
-		rightBlock[i] = lipgloss.NewStyle().MaxWidth(rightW).Render(ln)
-	}
-	cols := lipgloss.JoinHorizontal(lipgloss.Top, strings.Join(leftBlock, "\n"), strings.Join(rightBlock, "\n"))
-	return strings.Join(head, "\n") + "\n" + cols
+	return left, right
 }
 
 // graphView renders a full-screen colored commit graph with j/k scrolling.

@@ -79,18 +79,20 @@ func TestApplyTheme(t *testing.T) {
 	}
 }
 
-// The , settings screen is a radio list: j/k move through options, a theme row
-// previews live, enter selects; tab flips to the keybindings view.
+// The settings face is a radio list: j/k move through options, a theme row
+// previews live, enter selects; tab flips back to the keybindings face.
 func TestTUI_SettingsScreen(t *testing.T) {
 	t.Cleanup(func() { applyTheme(themeByName("default")) })
 	rk := func(s string) tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)} }
 	cfg, repos := twoRepos(t)
 	m := loadAll(t, New(cfg, "", repos, nil), 100, 30)
 
-	mm, _ := m.Update(rk(","))
+	mm, _ := m.Update(rk("?")) // overlay opens on the keys face
 	m = mm.(Model)
-	if !m.showHelp || m.settingsCursor != 0 { // opens on the active theme (default = 0)
-		t.Fatalf("? should open settings on the active theme, cursor=%d", m.settingsCursor)
+	mm, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // tab flips to settings
+	m = mm.(Model)
+	if !m.showHelp || m.showKeys || m.settingsCursor != 0 { // opens on the active theme (default = 0)
+		t.Fatalf("? then tab should show settings on the active theme, cursor=%d", m.settingsCursor)
 	}
 
 	// j moves onto serika_dark and previews it live — but does NOT commit yet
@@ -168,7 +170,9 @@ func TestTUI_HarnessSettingAndBar(t *testing.T) {
 	if v := stripANSI(m.View()); !strings.Contains(v, "harness: claude") {
 		t.Errorf("bottom bar should show the active harness; view:\n%s", v)
 	}
-	mm, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(",")}) // , opens settings
+	mm, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("?")}) // ? opens the overlay
+	m = mm.(Model)
+	mm, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // tab flips to the settings face
 	m = mm.(Model)
 	sv := stripANSI(m.View())
 	for _, want := range []string{"AI harness", "claude", "codex"} {
@@ -197,7 +201,9 @@ func TestTUI_SettingsPreviewRevert(t *testing.T) {
 	t.Cleanup(func() { applyTheme(themeByName("default")) })
 	cfg, repos := twoRepos(t)
 	m := loadAll(t, New(cfg, "", repos, nil), 100, 30)
-	mm, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(",")}) // , opens settings
+	mm, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("?")}) // ? opens the overlay
+	m = mm.(Model)
+	mm, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // tab flips to the settings face
 	m = mm.(Model)
 	mm, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")}) // preview serika_dark
 	m = mm.(Model)
@@ -661,66 +667,180 @@ func TestTUI_EveryRouteToBranchesDropsPRFilter(t *testing.T) {
 // ? is the universal "show me the keys" reflex. It must land on the keybindings,
 // never on a settings form — that is the whole point of splitting the two. Each
 // key also toggles its OWN page: ? on the keys closes; ? on settings switches.
-func TestTUI_HelpAndSettingsAreSeparateKeys(t *testing.T) {
+// `?` is the ONLY door into the overlay — settings has no key of its own. It opens
+// on the keys face and closes from either face, and the two faces are reached with
+// tab / shift+tab / [ / ] from inside. `,` must be completely inert: it was the
+// settings key and anyone with the old habit must get a no-op, not a surprise.
+func TestTUI_HelpOverlayIsOneKey(t *testing.T) {
 	t.Cleanup(func() { applyTheme(themeByName("default")) })
 	cfg, repos := twoRepos(t)
 	rk := func(s string) tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)} }
 	press := func(m Model, s string) Model { mm, _ := m.Update(rk(s)); return mm.(Model) }
 
-	// ? -> keys
+	// ? -> the keys face
 	m := loadAll(t, New(cfg, "", repos, nil), 120, 40)
 	m = press(m, "?")
 	if !m.showHelp || !m.showKeys {
 		t.Fatalf("? -> showHelp=%v showKeys=%v, want both true", m.showHelp, m.showKeys)
 	}
-	if v := stripANSI(m.View()); !strings.Contains(v, "keybindings") {
-		t.Error("? should render the keybindings page")
+	if v := stripANSI(m.View()); !strings.Contains(v, "Panels & navigation") {
+		t.Error("? should render the keybindings face")
 	}
 	// ? again closes it
 	if m = press(m, "?"); m.showHelp {
-		t.Error("? on the keys page should close the overlay")
+		t.Error("? on the keys face should close the overlay")
 	}
 
-	// , -> settings, on the active theme
-	m = press(m, ",")
-	if !m.showHelp || m.showKeys {
-		t.Fatalf(", -> showHelp=%v showKeys=%v, want settings", m.showHelp, m.showKeys)
-	}
-	if v := stripANSI(m.View()); !strings.Contains(v, "settings") {
-		t.Error(", should render the settings page")
-	}
-	if m.settingsCursor != themeIndex(m.cfg.Theme) {
-		t.Errorf("settingsCursor = %d, want the active theme row %d", m.settingsCursor, themeIndex(m.cfg.Theme))
-	}
-	// , again closes it
+	// , is retired: it must do nothing at all
 	if m = press(m, ","); m.showHelp {
-		t.Error(", on the settings page should close the overlay")
+		t.Error(", must no longer open anything — it is a removed key")
 	}
 
-	// tab still flips between the two
-	m = press(m, "?")
-	mm, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
-	m = mm.(Model)
-	if m.showKeys {
-		t.Error("tab from the keys page should flip to settings")
-	}
-	mm, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
-	if !mm.(Model).showKeys {
-		t.Error("tab from settings should flip back to the keys")
+	// every switch key flips the face, and back again
+	for _, k := range []tea.KeyMsg{
+		{Type: tea.KeyTab},
+		{Type: tea.KeyShiftTab},
+		{Type: tea.KeyRunes, Runes: []rune("[")},
+		{Type: tea.KeyRunes, Runes: []rune("]")},
+	} {
+		m = press(m, "?") // fresh overlay on the keys face
+		mm, _ := m.Update(k)
+		m = mm.(Model)
+		if m.showKeys {
+			t.Errorf("%v from the keys face should flip to settings", k)
+		}
+		if v := stripANSI(m.View()); !strings.Contains(v, "j/k move · enter select") {
+			t.Errorf("%v should render the settings face", k)
+		}
+		if m.settingsCursor != themeIndex(m.cfg.Theme) {
+			t.Errorf("%v into settings: cursor = %d, want the active theme row %d",
+				k, m.settingsCursor, themeIndex(m.cfg.Theme))
+		}
+		mm, _ = m.Update(k)
+		m = mm.(Model)
+		if !m.showKeys {
+			t.Errorf("%v from settings should flip back to the keys face", k)
+		}
+		// ? closes from either face — leave the overlay shut for the next round
+		if m = press(m, "?"); m.showHelp {
+			t.Errorf("? should have closed the overlay after %v", k)
+		}
 	}
 }
 
-// The keybindings page is the ONLY place that names `,`, so it is the entire
-// discovery chain for settings. If it stops listing it, settings is unreachable
-// for anyone who doesn't already know the key.
+// overlayBox CENTRES the body block, so if the two faces render different-sized
+// blocks the whole overlay — tab bar included — jumps when you press tab. The keys
+// face is naturally much bigger (108x30 against 71x21 at 120x40), so helpView pads
+// both to a shared footprint. Without that padding this test fails by ~37 columns.
+func TestTUI_OverlayFacesShareOneFootprint(t *testing.T) {
+	t.Cleanup(func() { applyTheme(themeByName("default")) })
+	for _, d := range []struct{ w, h int }{{80, 20}, {100, 30}, {120, 40}, {160, 50}} {
+		cfg, repos := twoRepos(t)
+		m := loadAll(t, New(cfg, "", repos, nil), d.w, d.h)
+		mm, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("?")})
+		m = mm.(Model)
+
+		// Where does the tab bar actually land on screen? That is the thing the user
+		// sees move. Measured through helpView, so this fails if helpView stops
+		// padding — asserting on padBlock directly would pass either way.
+		tabPos := func(v string) (row, col int) {
+			for i, ln := range strings.Split(stripANSI(v), "\n") {
+				if c := strings.Index(ln, "Keys"); c >= 0 && strings.Contains(ln, "Settings") {
+					return i, c
+				}
+			}
+			return -1, -1
+		}
+		m.showKeys = true
+		kRow, kCol := tabPos(m.helpView())
+		m.showKeys = false
+		sRow, sCol := tabPos(m.helpView())
+		if kRow < 0 || sRow < 0 {
+			t.Fatalf("%dx%d: could not find the tab bar on both faces", d.w, d.h)
+		}
+		if kRow != sRow || kCol != sCol {
+			t.Errorf("%dx%d: the tab bar moves on tab — keys at (%d,%d), settings at (%d,%d)",
+				d.w, d.h, kRow, kCol, sRow, sCol)
+		}
+		// and the keys face must fit the box, not be silently clipped by it
+		if _, kh := blockSize(m.keysBody()); kh > d.h-2 {
+			t.Errorf("%dx%d: keys face is %d lines but the box holds %d — rows are unreachable",
+				d.w, d.h, kh, d.h-2)
+		}
+	}
+}
+
+// The keys face is 28 rows and a short terminal shows 16, so j/k has to scroll it
+// or the bottom rows are unreachable. The offset must also clamp at both ends.
+func TestTUI_KeysFaceScrolls(t *testing.T) {
+	t.Cleanup(func() { applyTheme(themeByName("default")) })
+	cfg, repos := twoRepos(t)
+	m := loadAll(t, New(cfg, "", repos, nil), 80, 20)
+	press := func(m Model, s string) Model {
+		mm, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)})
+		return mm.(Model)
+	}
+	m = press(m, "?")
+	if m.keysRowCount() <= m.keysAvail() {
+		t.Fatalf("fixture is not scrollable: %d rows, %d visible", m.keysRowCount(), m.keysAvail())
+	}
+	maxOff := m.keysRowCount() - m.keysAvail()
+
+	first := stripANSI(m.keysBody())
+	m = press(m, "j")
+	if m.keysOffset != 1 {
+		t.Errorf("j should scroll the keys face, offset=%d", m.keysOffset)
+	}
+	if stripANSI(m.keysBody()) == first {
+		t.Error("j scrolled the offset but rendered the same rows")
+	}
+	// k clamps at the top
+	m = press(m, "k")
+	m = press(m, "k")
+	if m.keysOffset != 0 {
+		t.Errorf("k should clamp at the top, offset=%d", m.keysOffset)
+	}
+	// j clamps at the bottom
+	for i := 0; i < maxOff+5; i++ {
+		m = press(m, "j")
+	}
+	if m.keysOffset != maxOff {
+		t.Errorf("j should clamp at the bottom, offset=%d want %d", m.keysOffset, maxOff)
+	}
+	// the last row must be reachable — it never was before windowing
+	if !strings.Contains(stripANSI(m.keysBody()), "branch has no upstream") {
+		t.Error("the final legend row is still unreachable after scrolling to the bottom")
+	}
+}
+
+// The bottom strip is the most-read copy in the app and nothing guarded it, so a
+// retired key could linger there indefinitely. It is also duplicated verbatim into
+// docs/assets/demo.js, so drift here means the site advertises a key the binary
+// doesn't have.
+func TestTUI_FooterAdvertisesOnlyLiveKeys(t *testing.T) {
+	cfg, repos := twoRepos(t)
+	m := loadAll(t, New(cfg, "", repos, nil), 120, 40)
+	f := stripANSI(m.footer())
+	if !strings.Contains(f, "? help") {
+		t.Errorf("footer must point at the ? overlay; got:\n%s", f)
+	}
+	if strings.Contains(f, ", settings") {
+		t.Errorf("footer still advertises the retired , key; got:\n%s", f)
+	}
+}
+
+// Settings has no key of its own, so the keys face is the entire discovery chain:
+// the tab bar shows the face exists, and the "This screen" group names the keys
+// that reach it. If either stops being rendered, settings is unreachable for
+// anyone who doesn't already know — which is the whole cost of retiring `,`.
 func TestTUI_KeysPageDocumentsSettingsKey(t *testing.T) {
 	cfg, repos := twoRepos(t)
 	m := loadAll(t, New(cfg, "", repos, nil), 120, 40)
 	mm, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("?")})
 	v := stripANSI(mm.(Model).View())
-	for _, want := range []string{"This screen", ",", "settings"} {
+	for _, want := range []string{"Settings", "This screen", "tab / [ ]", "keys <-> settings"} {
 		if !strings.Contains(v, want) {
-			t.Errorf("the keys page must mention %q — it is how you find settings", want)
+			t.Errorf("the keys face must show %q — it is how you find settings", want)
 		}
 	}
 }

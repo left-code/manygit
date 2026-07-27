@@ -84,6 +84,7 @@ type Model struct {
 	// reference; editingOpenCmd/openCmdBuf drive the inline editor edit.
 	settingsCursor int
 	showKeys       bool
+	keysOffset     int // scroll offset for the keys face (j/k) — it outgrows short terminals
 	editingOpenCmd bool
 	openCmdBuf     string
 
@@ -247,7 +248,7 @@ func (m Model) visiblePRs() []gh.PullRequest {
 }
 
 // New builds a Model from discovered repos and scripts. root is the directory
-// they were found under — the `,` settings screen's scan-depth setting re-walks it.
+// they were found under — the settings face's scan-depth setting re-walks it.
 func New(cfg config.Config, root string, repos []discover.Repo, scripts []discover.Script) Model {
 	vms := make([]*repoVM, len(repos))
 	for i, r := range repos {

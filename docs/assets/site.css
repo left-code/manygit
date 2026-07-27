@@ -721,6 +721,14 @@ a.chip:hover {
 .tab[data-on="0"] {
   color: var(--dim);
 }
+/* The ? overlay's two faces reuse this chrome, but the INACTIVE face is not
+   dimmed. Every other tab bar is numbered, so its dim tab still has a documented
+   way in; Settings has no key of its own since `,` was retired, which makes this
+   label the only signpost to it — and --dim is the palette's lowest-contrast
+   colour. Same reasoning as overlayTabs() in view.go and demo.js. */
+.tab--face[data-on="0"] {
+  color: var(--ink);
+}
 .tabdiv {
   color: var(--dim);
 }
@@ -1014,7 +1022,7 @@ a.chip:hover {
   color: var(--muted);
 }
 
-/* The ? / , overlay body is centred both ways inside the full-screen pane, the
+/* The ? overlay body is centred both ways inside the full-screen pane, the
    way the Go's overlayBox lipgloss.Place's it. The block centres as a unit, so
    the columns inside keep their own alignment. */
 .overlay {
@@ -1024,7 +1032,22 @@ a.chip:hover {
   justify-items: start;
 }
 
-/* the , settings list, two columns — same split as the Go's settingsBody */
+/* Both overlay faces are rendered and stacked in ONE grid cell. The inactive one
+   keeps visibility:hidden rather than display:none, so it still contributes to the
+   stack's size — which makes the stack as large as the bigger face and stops the
+   centred block (tab bar included) from jumping when you switch. This is the port
+   of padBlock() in view.go; the browser does the max() for us. */
+.overlay__stack {
+  display: grid;
+}
+.overlay__face {
+  grid-area: 1 / 1;
+}
+.overlay__face[data-on="0"] {
+  visibility: hidden;
+}
+
+/* the settings face's list, two columns — same split as the Go's settingsBody */
 .scols {
   display: grid;
   grid-template-columns: auto auto;

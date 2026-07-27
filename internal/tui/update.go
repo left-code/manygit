@@ -516,14 +516,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "q", "ctrl+c":
 		return m, tea.Quit
 	case "?":
-		// ? is the universal "show me the keys" reflex — it must land on the
-		// keybindings, not a settings form. Settings has its own key now (,).
+		// ? is the universal "show me the keys" reflex, so it lands on the
+		// keybindings. Settings is the overlay's other face, reached from inside
+		// with tab / shift+tab / [ / ] — it has no key of its own.
 		m.showHelp = true
 		m.showKeys = true
-	case ",":
-		m.showHelp = true
-		m.showKeys = false
-		m.settingsCursor = themeIndex(m.cfg.Theme) // start on the active theme
 	case "z":
 		// Maximize the focused pane to full screen (toggle); zoom follows focus.
 		m.zoomed = !m.zoomed
@@ -873,8 +870,9 @@ func (m Model) handleFilterKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // handleSettingsKey drives the settings/help overlay: j/k move through the
 // radio-list (a theme row previews live), enter selects the highlighted row
-// (editor row → inline edit), tab/? flips to the keybindings reference, esc
-// closes (discarding any un-selected theme preview).
+// (editor row → inline edit), tab / shift+tab / [ / ] flip between the settings
+// and keybindings faces, and ? or esc closes from either (discarding any
+// un-selected theme preview).
 func (m Model) handleSettingsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.editingOpenCmd {
 		switch msg.Type {
@@ -896,38 +894,36 @@ func (m Model) handleSettingsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "q", "ctrl+c":
 		return m, tea.Quit
-	case "tab":
+	case "tab", "shift+tab", "[", "]":
+		// Two faces, so forward and backward land in the same place. Flipping INTO
+		// settings parks the cursor on the committed theme — this seeding used to
+		// live in the , cases, and nothing else does it.
 		m.showKeys = !m.showKeys
-	case "?":
-		// Each key toggles its OWN page: ? on the keys closes, ? on settings
-		// switches to the keys. Same for , the other way round.
-		if m.showKeys {
-			// This is a CLOSE, so it owes the same preview cleanup as , and esc:
-			// j/k on the settings page apply themes live, and you can reach the
-			// keys page (and this branch) with that preview still uncommitted.
-			applyTheme(themeByName(m.cfg.Theme))
-			m.showHelp = false
-		} else {
-			m.showKeys = true
-		}
-	case ",":
-		if m.showKeys {
-			m.showKeys = false
+		if !m.showKeys {
 			m.settingsCursor = themeIndex(m.cfg.Theme)
-		} else {
-			applyTheme(themeByName(m.cfg.Theme)) // drop any live theme preview
-			m.showHelp = false
 		}
+	case "?":
+		// ? is the door in AND out: it closes from either face, exactly like esc.
+		// That owes the preview cleanup below — j/k on the settings face applies
+		// themes live, so closing from there with an uncommitted preview would
+		// otherwise leave it applied app-wide.
+		applyTheme(themeByName(m.cfg.Theme))
+		m.showHelp = false
 	case "esc":
 		applyTheme(themeByName(m.cfg.Theme)) // discard any live theme preview
 		m.showHelp = false
 	case "down", "j":
-		if !m.showKeys {
+		if m.showKeys {
+			// The keys face is taller than a short terminal, so j/k scrolls it.
+			m.keysOffset = clampInt(m.keysOffset+1, 0, max(0, m.keysRowCount()-m.keysAvail()))
+		} else {
 			m.settingsCursor = clampInt(m.settingsCursor+1, 0, settingsItemCount()-1)
 			m.previewSettings()
 		}
 	case "up", "k":
-		if !m.showKeys {
+		if m.showKeys {
+			m.keysOffset = clampInt(m.keysOffset-1, 0, max(0, m.keysRowCount()-m.keysAvail()))
+		} else {
 			m.settingsCursor = clampInt(m.settingsCursor-1, 0, settingsItemCount()-1)
 			m.previewSettings()
 		}

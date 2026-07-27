@@ -310,7 +310,7 @@
     filterPanel: "repos", // repos | scripts | branches | prs
     filterAttention: false,
 
-    showHelp: false, showKeys: false, showGraph: false, showNews: false,
+    showHelp: false, showKeys: false, keysOffset: 0, showGraph: false, showNews: false,
     showTags: false, zoomed: false,
 
     settingsCursor: 0,
@@ -911,7 +911,7 @@
     var enter = "enter branches";
     if (S.focus === "scripts") enter = "enter run";
     else if (S.focus === "branches") enter = S.topView === "prs" ? "enter checkout PR" : "enter checkout";
-    return d(enter + " | z zoom | g graph | n news | t tags | F changed | s sync | p push | d/D discard | o open | r refetch | ? keys | , settings | q quit");
+    return d(enter + " | z zoom | g graph | n news | t tags | F changed | s sync | p push | d/D discard | o open | r refetch | ? help | q quit");
   }
   function indicators() {
     var harnessOK = HARNESSES.some(function (h) { return h.name === S.harness && h.installed; });
@@ -1000,13 +1000,42 @@
     while (left.length < n) left.push("<div>&nbsp;</div>");
     while (right.length < n) right.push("<div>&nbsp;</div>");
     var w = win(n, cursorLine, avail);
-    return "<div>" + sp("a", "manygit — settings") + d("   (,)") + "</div><div>&nbsp;</div>" +
+    return overlayHead() +
       '<div class="scols"><div>' + left.slice(w[0], w[1]).join("") + "</div>" +
       "<div>" + right.slice(w[0], w[1]).join("") + "</div></div>" +
-      "<div>&nbsp;</div><div>" + d("j/k move · enter select · tab keys · esc close") + "</div>";
+      "<div>&nbsp;</div><div>" + d("j/k move · enter select") + "</div>";
   }
 
-  function keysBody() {
+  // overlayTabs / overlayHead — ports of view.go. Same tab chrome as topTabs and
+  // bottomTabs, with two deliberate differences: the faces carry no number (they
+  // have no numeric shortcut), and the inactive face is NOT dimmed — with , retired
+  // it is the only signpost to Settings, and --dim is the lowest-contrast colour.
+  function overlayTabs(onKeys) {
+    return ["Keys", "Settings"].map(function (name, i) {
+      var on = (i === 0) === !!onKeys;
+      return '<span class="tab tab--face" data-on="' + (on ? 1 : 0) + '">' +
+        esc(" " + name + " ") + "</span>";
+    }).join('<span class="tabdiv">│</span>');
+  }
+
+  // The two lines both faces share. This REPLACES the old per-face title rather
+  // than adding a row: the body already fills the box exactly at the smallest
+  // supported size, so an extra line would clip the footer (view.go says the same).
+  function overlayHead() {
+    return "<div>" + overlayTabs(S.showKeys) + d("   tab · [ ] switch · esc close") +
+      "</div><div>&nbsp;</div>";
+  }
+
+  // The tab bar sits inside #term, which is rebuilt wholesale on every keystroke,
+  // so a screen reader never hears it change. Mirror overlay state into the live
+  // region that lives OUTSIDE #term — the same channel setStatus uses. This is
+  // announce-only: it sets no visible status line, because the overlay already
+  // shows the change on screen.
+  function announce(s) { if (el.say) el.say.textContent = s; }
+
+  // keysBody takes a row budget and windows to it, like the Go's keysBody: the
+  // reference is 28 rows and a short terminal shows fewer, so j/k scrolls it.
+  function keysBody(h) {
     var uni = S.glyphs === "unicode";
     var up = uni ? "↑" : "+", dn = uni ? "↓" : "-";
     function kr(k, t) { return '<div>  <span class="kcol">' + k + "</span>" + d(t) + "</div>"; }
@@ -1034,9 +1063,10 @@
       kr("enter", "checkout the PR's branch in its repo"),
       "<div>&nbsp;</div>",
       "<div>" + gp("This screen") + "</div>",
-      kr("?", "this page"),
-      kr(",", "settings (themes, harness, depth)"),
-      kr("tab", "flip keys <-> settings"),
+      kr("?", "open / close this overlay"),
+      kr("tab / [ ]", "keys <-> settings"),
+      kr("j/k", "scroll this page"),
+      kr("esc", "close this overlay"),
       kr("q", "quit manygit")
     ];
     // The Go keeps "Graph -> Changes" at the foot of the LEFT column (view.go's
@@ -1070,8 +1100,15 @@
       kr(d("no-remote"), "local-only repo (no remote configured)"),
       kr(rd("!"), "branch has no upstream, or error")
     ];
-    return "<div>" + sp("a", "manygit — keybindings") + d("   (tab or , for settings · esc close)") + "</div>" +
-      '<div>&nbsp;</div><div class="kcols"><div>' + left.join("") + "</div><div>" + right.join("") + "</div></div>";
+    var n = Math.max(left.length, right.length);
+    while (left.length < n) left.push("<div>&nbsp;</div>");
+    while (right.length < n) right.push("<div>&nbsp;</div>");
+    var avail = Math.max(1, h - 2); // the two head lines; settingsBody subtracts 4
+    S.keysOffset = clamp(S.keysOffset, 0, Math.max(0, n - avail));
+    var w = win(n, S.keysOffset + avail - 1, avail);
+    return overlayHead() +
+      '<div class="kcols"><div>' + left.slice(w[0], w[1]).join("") +
+      "</div><div>" + right.slice(w[0], w[1]).join("") + "</div></div>";
   }
 
   /* -- the screen ---------------------------------------------------------- */
@@ -1089,8 +1126,18 @@
       // helpView is an untitled full-screen panel (overlayBox), not a titledBox.
       // overlayBox centres the body block both ways — the block moves as a unit,
       // so the columns inside stay aligned with each other.
+      //
+      // Both faces are rendered and STACKED in one grid cell, with the inactive one
+      // visibility:hidden so it still contributes its size. That makes the stack as
+      // big as the larger face, which is this port's padBlock: the keys face is far
+      // wider and taller than settings, and without it the centred block — tab bar
+      // included — jumped every time you pressed tab.
+      var h = rows("help", 20);
       renderOverlay(pane("", true,
-        '<div class="overlay">' + (S.showKeys ? keysBody() : settingsBody(rows("help", 20))) + "</div>",
+        '<div class="overlay"><div class="overlay__stack">' +
+        '<div class="overlay__face" data-on="' + (S.showKeys ? 1 : 0) + '">' + keysBody(h) + "</div>" +
+        '<div class="overlay__face" data-on="' + (S.showKeys ? 0 : 1) + '">' + settingsBody(h) + "</div>" +
+        "</div></div>",
         "help"));
       return;
     }
@@ -1407,7 +1454,7 @@
 
   // The demo's `q` divergence: the Go quits from here, the browser can't. One
   // string, used in every state the Go binds q — top level, the graph and news
-  // overlays, and the ?/, overlay — so the key never just swallows a press.
+  // overlays, and the ? overlay — so the key never just swallows a press.
   var QUIT_HINT = "q quits manygit — this is a browser demo, so it stays";
 
   function handleSettingsKey(k) {
@@ -1419,28 +1466,31 @@
       return;
     }
     var rows = settingRows();
-    // each key toggles its OWN page: ? on the keys closes, ? on settings switches
-    // to the keys; , the other way round. tab just flips.
+    // ? is the door in AND out — it closes from either face, exactly like esc. Both
+    // owe the theme-preview cleanup: j/k on the settings face applies themes live,
+    // and in a browser a leaked preview sticks to documentElement site-wide.
+    // tab / shift+tab / [ / ] all flip the face (e.key is "Tab" for shift+tab too,
+    // and with two faces forward and backward land in the same place). Flipping
+    // INTO settings parks the cursor on the committed theme — that seeding was the
+    // , key's job and has nowhere else to live.
     if (k === "q") setStatus(d(QUIT_HINT)); // Go: quits from the overlay
-    else if (k === "Tab") S.showKeys = !S.showKeys;
-    else if (k === "?") {
-      // A close owes the same preview cleanup as , and esc — see update.go.
-      if (S.showKeys) { applyTheme(S.theme); S.showHelp = false; }
-      else S.showKeys = true;
-    } else if (k === ",") {
-      if (S.showKeys) {
-        S.showKeys = false;
-        S.settingsCursor = Math.max(0, THEMES.indexOf(S.theme));
-      } else {
-        applyTheme(S.theme);
-        S.showHelp = false;
-      }
+    else if (k === "Tab" || k === "[" || k === "]") {
+      S.showKeys = !S.showKeys;
+      if (!S.showKeys) S.settingsCursor = Math.max(0, THEMES.indexOf(S.theme));
+      announce(S.showKeys ? "Keys" : "Settings");
     }
-    else if (k === "Escape") { applyTheme(S.theme); S.showHelp = false; }
-    else if ((k === "j" || k === "ArrowDown") && !S.showKeys) {
-      S.settingsCursor = clamp(S.settingsCursor + 1, 0, rows.length - 1); previewSettings();
-    } else if ((k === "k" || k === "ArrowUp") && !S.showKeys) {
-      S.settingsCursor = clamp(S.settingsCursor - 1, 0, rows.length - 1); previewSettings();
+    else if (k === "?" || k === "Escape") {
+      applyTheme(S.theme); S.showHelp = false;
+      announce("Help closed");
+    }
+    // j/k drives whichever face is showing: the settings cursor, or the keys face's
+    // scroll (it is taller than the terminal, so its last rows need reaching).
+    else if (k === "j" || k === "ArrowDown") {
+      if (S.showKeys) S.keysOffset++; // keysBody clamps against its own row count
+      else { S.settingsCursor = clamp(S.settingsCursor + 1, 0, rows.length - 1); previewSettings(); }
+    } else if (k === "k" || k === "ArrowUp") {
+      if (S.showKeys) S.keysOffset = Math.max(0, S.keysOffset - 1);
+      else { S.settingsCursor = clamp(S.settingsCursor - 1, 0, rows.length - 1); previewSettings(); }
     } else if ((k === "Enter" || k === " ") && !S.showKeys) {
       var r = rows[S.settingsCursor];
       if (r.kind === SK_THEME) {
@@ -1487,12 +1537,12 @@
       case "q":
         setStatus(d(QUIT_HINT)); break;
       case "?":
-        // ? is the universal "show me the keys" reflex — it lands on the
-        // keybindings, not a settings form. Settings has its own key (,).
-        S.showHelp = true; S.showKeys = true; break;
-      case ",":
-        S.showHelp = true; S.showKeys = false;
-        S.settingsCursor = Math.max(0, THEMES.indexOf(S.theme)); break;
+        // ? is the universal "show me the keys" reflex, so it lands on the
+        // keybindings. Settings is the overlay's other face, reached from inside
+        // with tab / shift+tab / [ / ] — it has no key of its own.
+        S.showHelp = true; S.showKeys = true;
+        announce("Help open — Keys. tab or bracket keys switch to Settings.");
+        break;
       case "z": S.zoomed = !S.zoomed; break;
       case "g": S.showGraph = true; S.graphOffset = 0; break;
       case "n": S.showNews = true; S.newsOffset = 0; break;
