@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 # manygit installer. Usage:
 #   curl -fsSL https://raw.githubusercontent.com/rabeeh-ta/manygit/main/install.sh | bash
+#
+# Installs the latest release by default. To pin a version (e.g. to roll back),
+# pass it as an argument or in MANYGIT_VERSION:
+#   curl -fsSL .../install.sh | bash -s -- v1.0.7
+#   MANYGIT_VERSION=v1.0.7 ./install.sh
 set -euo pipefail
 
 repo="rabeeh-ta/manygit"
@@ -26,9 +31,20 @@ case "$arch" in
   *) die "unsupported architecture: $arch" ;;
 esac
 
-tag=$(curl -fsSL "https://api.github.com/repos/$repo/releases/latest" \
-      | grep '"tag_name"' | head -1 | cut -d'"' -f4)
-[ -n "$tag" ] || die "no published release found for $repo yet"
+# An explicit version (arg or MANYGIT_VERSION) pins the install; otherwise the
+# newest release wins. Pinning is how you roll back to an earlier build.
+tag="${MANYGIT_VERSION:-${1:-}}"
+pinned=""
+if [ -n "$tag" ]; then
+  pinned=yes
+  case "$tag" in v*) ;; *) tag="v$tag" ;; esac   # accept "1.0.7" or "v1.0.7"
+  curl -fsSL -o /dev/null "https://api.github.com/repos/$repo/releases/tags/$tag" \
+    || die "no release tagged $tag (see https://github.com/$repo/releases)"
+else
+  tag=$(curl -fsSL "https://api.github.com/repos/$repo/releases/latest" \
+        | grep '"tag_name"' | head -1 | cut -d'"' -f4)
+  [ -n "$tag" ] || die "no published release found for $repo yet"
+fi
 
 asset="${bin}_${os}_${arch}.tar.gz"
 url="https://github.com/$repo/releases/download/$tag/$asset"
@@ -45,6 +61,12 @@ mkdir -p "$install_dir"
 mv "$tmp/$bin" "$install_dir/$bin"
 chmod +x "$install_dir/$bin"
 printf 'Installed to %s\n' "$install_dir/$bin"
+
+# A pinned version is usually a rollback, and manygit's launch check would offer
+# to pull it straight back to newest. Say so instead of letting it surprise them.
+if [ -n "$pinned" ]; then
+  printf 'Pinned to %s. manygit checks for a newer release on launch — answer "n",\nor use --no-update-check / MANYGIT_NO_UPDATE_CHECK=1 to stay on this version.\n' "$tag"
+fi
 
 # Put install_dir on PATH if it isn't already.
 case ":$PATH:" in

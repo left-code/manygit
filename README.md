@@ -22,7 +22,19 @@ curl -fsSL https://raw.githubusercontent.com/rabeeh-ta/manygit/main/install.sh |
 
 This drops `manygit` into `~/.local/bin` (adding it to your PATH if needed), so
 you can run `manygit` from anywhere. On each launch it checks for a newer release
-and offers to update itself.
+and offers to update itself (`--no-update-check`, or `MANYGIT_NO_UPDATE_CHECK=1`,
+skips that).
+
+To install a **specific version** — rolling back, or pinning a machine — pass the
+tag:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/rabeeh-ta/manygit/main/install.sh | bash -s -- v1.0.7
+```
+
+The self-updater only ever moves *forward*, so a downgrade goes through the
+installer. Since the launch check will then offer to pull you back to the newest
+release, answer `n` or use `--no-update-check` to stay put.
 
 <details>
 <summary>From source (needs Go 1.24+)</summary>
