@@ -82,6 +82,7 @@ Actions apply to the **highlighted** repo (the `>` cursor).
 | `t` | toggle each repo's latest tag inline, after the branch (off by default) |
 | `F` | show only repos with changes / ahead / behind |
 | `/` | filter the focused list by what it shows — repos match on name **and** current branch (`/master` finds every repo on master, and the tag too while `t` is on); branches match on name (type `feat` to find a remote branch among hundreds); scripts on name |
+| `:` | **plain-English git** — type a request (`rebase current onto master`, `sync everything in other/`), your AI harness turns it into git commands, you confirm them, manygit runs them. Repo/folder/branch names autocomplete with `tab`, and `@script.sh` pulls a file in as context (`@scripts/update-all.sh only the frontend apps from this`). Output goes to the Output pane. `↑`/`↓` recall this session's earlier requests; `alt+backspace` / `ctrl+w` delete a word, `ctrl+u` the line |
 | `o` | open the repo in your editor |
 | `z` | zoom the focused pane |
 | `esc` | back out one layer of state: the diff, then Changes, then zoom, then the `/` and `F` filters |
@@ -138,9 +139,18 @@ through its Remote-SSH server: manygit finds that server's socket automatically,
 so `o` works from a plain terminal too **as long as an editor window is connected
 to the machine** — otherwise there's nothing to open into.
 
-manygit never writes to the folder you launch from, and never force-pushes,
-merges, or rebases. The only destructive action is discarding a repo's changes
-(`d` / `D`), which always asks you to confirm first.
+manygit never writes to the folder you launch from. On its own it never
+force-pushes, merges, or rebases — `s` is fetch + fast-forward-only pull and `p`
+is a plain push — and the only destructive thing it offers directly is discarding
+a repo's changes (`d` / `D`), which always asks you to confirm first.
+
+`:` deliberately widens that, since merging, rebasing and tagging are the point of
+it. Three things keep it honest: every command is shown before it runs and needs a
+`y`; git is executed with an argument list, never through a shell, so pipes, `&&`
+and `rm` cannot be expressed; and force-pushes, remote deletions and the git flags
+that take a shell command (`-c`, `rebase --exec`, `submodule foreach`,
+`filter-branch`, `bisect run`) are refused before the confirm appears. A batch
+stops at the first failure, so a conflict leaves you one repo to fix, not five.
 
 ## Releasing (maintainer)
 

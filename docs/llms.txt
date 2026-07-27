@@ -63,6 +63,12 @@ Actions apply to the repo under the `>` cursor.
 - `t` — show each repo's latest tag inline
 - `g` / `n` — full-screen commit graph / full-screen news feed
 - `m` — in the PRs pane, toggle your PRs and review requests
+- `:` — plain-English git: the request goes to your AI harness (claude or codex) with the
+  repo tree as context; it replies with git commands, manygit shows them and runs them only
+  after you confirm. Only git — never a shell, never a force-push or a remote delete.
+  Reference a file with `@path` (tab-completes on the scripts it found) to send its
+  contents along: `@scripts/update-all.sh only the frontend apps from this`. Referenced
+  files must live inside the scanned tree.
 - `o` / `z` — open the repo in your editor / zoom the focused pane
 - `tab` / `shift+tab` — cycle the panes
 - `[` / `]` — cycle the focused pane's tabs
@@ -85,6 +91,12 @@ Actions apply to the repo under the `>` cursor.
 
 ## Other features
 
+- Plain-English git (`:`): type a request, your AI harness turns it into git
+  commands against the whole tree, you confirm them, manygit runs them. `@path`
+  sends a file along as context. Only git, never a shell; force-pushes and remote
+  deletions are refused; a batch stops at the first failure. Each request stands
+  alone — there is no conversation, so it never asks a question: it picks the most
+  likely reading and you approve or decline the commands.
 - GitHub PRs: with the `gh` CLI signed in, `4` lists your open PRs and the ones
   awaiting your review. `enter` checks the PR's branch out in the matching local
   clone via `gh pr checkout`.
@@ -96,9 +108,17 @@ Actions apply to the repo under the `>` cursor.
 
 ## Safety
 
-manygit never writes to the folder you launch it from, and never force-pushes,
-merges, or rebases. The only destructive action is discarding a repo's changes
-(`d` / `D`), which always asks first.
+manygit never writes to the folder you launch it from. On its own it never
+force-pushes, merges, or rebases: `s` is fetch + fast-forward-only pull, and `p`
+is a plain push. The only destructive action it offers directly is discarding a
+repo's changes (`d` / `D`), which always asks first.
+
+`:` widens that, deliberately. It can merge, rebase, tag and push, because that
+is what it is for — but only commands it has shown you and you have confirmed,
+and it runs `git` with an argument list rather than through a shell, so pipes and
+`&&` are not expressible. Force-pushes, remote deletions, and the git flags that
+take a shell command (`-c`, `rebase --exec`, `submodule foreach`, `filter-branch`,
+`bisect run`) are refused before the confirm ever appears.
 
 ## Links
 

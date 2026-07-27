@@ -702,6 +702,15 @@ a.chip:hover {
   color: var(--accent);
 }
 
+/* Output rows wrap, unlike every other pane row. A harness note is a sentence,
+   not a column, and clipping it loses the end — the Go wraps these in
+   renderOutputView for the same reason. Long unbroken tokens (a URL, a hash)
+   break anywhere rather than pushing the pane wide. */
+.owrap {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .pane__body {
   height: 100%;
   overflow: hidden;

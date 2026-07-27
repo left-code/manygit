@@ -150,6 +150,22 @@ func Status(dir string) RepoStatus {
 }
 
 // Fetch updates remote-tracking refs for the default remote (quiet).
+// Run executes an arbitrary git command in dir and returns its combined useful
+// output. It is the one entry point in this package that does not name the
+// operation it performs, and it exists solely for the `:` harness mode, where
+// the command is composed at runtime.
+//
+// Everything else here is a named, audited verb; this is not. The argv comes
+// from a language model, so it MUST have been through aigit.Validate first, and
+// the user MUST have confirmed it. Nothing in this package can check that for
+// you — do not reach for Run to save writing a named function.
+//
+// args is passed to exec as separate arguments, never a shell string, so pipes,
+// redirection and && are not expressible.
+func Run(dir string, args ...string) (string, error) {
+	return run(dir, args...)
+}
+
 func Fetch(dir string) error {
 	_, err := run(dir, "fetch", "--quiet")
 	return err

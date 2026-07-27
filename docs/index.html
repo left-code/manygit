@@ -224,8 +224,8 @@
         <div class="shell">
           <div class="demo__head">
             <span
-              >A working copy of the interface, running here. The git is fake — the keys are the
-              real keys.</span
+              >A working copy of the interface, running here. The git is fake and
+              <b>:</b>'s AI reply is scripted — the keys are the real keys.</span
             >
             <span class="chip demo__cue--key">click to start it, then type · esc leaves</span>
             <span class="chip demo__cue--tap">swipe it · tap the keys below</span>
@@ -275,6 +275,7 @@
             <button class="key" type="button" data-key="g"><em>g</em> graph</button>
             <button class="key" type="button" data-key="n"><em>n</em> news</button>
             <button class="key" type="button" data-key="r"><em>r</em> refetch</button>
+            <button class="key" type="button" data-key=":"><em>:</em> ai git</button>
             <button class="key" type="button" data-key="?"><em>?</em> help</button>
             <button class="key" type="button" data-key="Tab"><em>tab</em> switch face</button>
           </div>
@@ -449,6 +450,17 @@
                   <td>Open the repo in your editor / zoom the focused pane</td>
                 </tr>
                 <tr>
+                  <td class="kt__k"><b>:</b></td>
+                  <td>
+                    Plain-English git. Type a request — <i>rebase current onto master</i>,
+                    <i>sync everything in apps</i> — and your AI harness turns it into git commands
+                    against the whole tree. Repo, folder and branch names complete with <b>tab</b>,
+                    and <code>@script.sh</code> sends that file along as context —
+                    <i>@scripts/update-all.sh only the frontend apps from this</i>.
+                    Nothing runs until you confirm
+                  </td>
+                </tr>
+                <tr>
                   <td class="kt__k"><b>?</b></td>
                   <td>
                     Help: the keybindings and the status legend, plus settings —
@@ -538,6 +550,48 @@
           </div>
         </section>
 
+        <!-- plain-English git -->
+        <section class="sec" id="ai">
+          <h2 class="lane">Plain&nbsp;English</h2>
+          <div class="sec__body">
+            <p class="sec__lede">
+              Press <b>:</b> and say what you want. It comes back as git commands you approve.
+            </p>
+            <p>
+              The prompt is named after your AI tool — <code>claude:</code> or <code>codex:</code> —
+              and it knows the tree it is looking at: every repo, its branch, whether it is dirty,
+              whether <code>main</code> is actually called <code>master</code>, and what the latest
+              tag is. So <i>rebase current onto master</i> rebases each repo onto its own main
+              branch, and <i>sync everything in apps</i> resolves the folder.
+            </p>
+            <div class="cmd">
+              <div class="cmd__txt" tabindex="0" role="group" aria-label="example, scrolls horizontally">
+                <span class="cmd__sigil">:</span>@scripts/update-all.sh only the frontend apps from this
+              </div>
+            </div>
+            <p>
+              <code>@</code> pulls a file in as context — point it at a script and ask for the part
+              you want. Repo, folder, branch and script names complete with <b>tab</b>, filling in
+              as far as they agree and waiting for the character that decides the rest.
+              <b>↑</b>/<b>↓</b> recall what you asked earlier in the session.
+            </p>
+            <p>
+              Nothing runs until you say so. The exact commands are printed, and a
+              <b>y</b> runs them; anything else drops the plan. A batch stops at the first failure,
+              so a conflict leaves you one repo to sort out rather than five. It only ever runs
+              <code>git</code> — asked for anything else, it says so in a sentence — and it is
+              executed as an argument list, never through a shell, so force-pushes and remote
+              deletions are refused before you are even asked.
+            </p>
+            <p>
+              Each request stands alone — there is no chat to follow up in, so it never asks you a
+              question. Given something ambiguous it picks the most likely reading and shows you the
+              commands; the plan <i>is</i> the question, and <b>y</b> or <b>N</b> is the answer.
+            </p>
+            <p>No AI tool installed? <b>:</b> says so and does nothing. Nothing else changes.</p>
+          </div>
+        </section>
+
         <!-- news -->
         <section class="sec" id="news">
           <h2 class="lane">News</h2>
@@ -599,9 +653,17 @@
               </tbody>
             </table>
             <p>
-              manygit never writes to the folder you launch it from, and never force-pushes, merges,
-              or rebases. The one destructive action is discarding a repo's changes with
-              <b>d</b> / <b>D</b>, and it always asks first.
+              manygit never writes to the folder you launch it from. On its own it never
+              force-pushes, merges, or rebases — <b>s</b> is fetch plus a fast-forward-only pull,
+              <b>p</b> is a plain push — and the one destructive action it offers directly is
+              discarding a repo's changes with <b>d</b> / <b>D</b>, which always asks first.
+            </p>
+            <p>
+              <b>:</b> widens that on purpose, since merging and rebasing are the point of it. Every
+              command is shown before it runs and needs a <b>y</b>; git is executed with an argument
+              list rather than through a shell, so pipes and <code>&amp;&amp;</code> cannot be
+              expressed; and force-pushes, remote deletions and the git flags that take a shell
+              command are refused before the confirm appears. A batch stops at the first failure.
             </p>
           </div>
         </section>

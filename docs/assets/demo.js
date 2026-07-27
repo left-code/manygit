@@ -307,6 +307,13 @@
 
     filter: "",
     filtering: false,
+    // `:` harness mode. The demo's FOURTH intentional divergence: there is no AI
+    // and no git in a browser, so the reply is a canned script. The page says so,
+    // exactly as it says the git is fake. Everything else here is real: the input,
+    // the ghost completion, the confirm, and the refusal of a dangerous command.
+    aiPrompting: false, aiPrompt: "", aiPending: null, aiGhost: false, aiGhostGen: 0,
+    // In-memory only, like the Go: a reload starts with an empty history.
+    aiHistory: [], aiHistIdx: 0, aiDraft: "",
     filterPanel: "repos", // repos | scripts | branches | prs
     filterAttention: false,
 
@@ -340,6 +347,7 @@
     newsOffset: 0,
 
     confirmDiscard: false,
+    confirmPlan: false,
     confirmFull: false,
     confirmName: "",
 
@@ -843,7 +851,10 @@
         : /^done\./.test(l) ? "gr"
         : /skipped|drifted|yes$/.test(l) ? "og"
         : "";
-      out += "<div>" + (cls ? sp(cls, l) : esc(l)) + "</div>";
+      // owrap, not the pane's default `pre`: a long harness note has to flow onto
+      // a second line instead of running off the edge. Port of the wrapping the Go
+      // does in renderOutputView.
+      out += '<div class="owrap">' + (cls ? sp(cls, l) : esc(l)) + "</div>";
     }
     return out;
   }
@@ -906,12 +917,13 @@
     return line;
   }
   function statusOrFilter() {
+    if (S.aiPrompting) return aiPromptLine();
     if (S.filtering) return yl("/" + S.filter + "_");
     if (S.statusLine) return S.statusLine;
     var enter = "enter branches";
     if (S.focus === "scripts") enter = "enter run";
     else if (S.focus === "branches") enter = S.topView === "prs" ? "enter checkout PR" : "enter checkout";
-    return d(enter + " | z zoom | g graph | n news | t tags | F changed | s sync | p push | d/D discard | o open | r refetch | ? help | q quit");
+    return d(enter + " | z zoom | g graph | n news | t tags | F changed | s sync | p push | d/D discard | o open | r refetch | : ai | ? help | q quit");
   }
   function indicators() {
     var harnessOK = HARNESSES.some(function (h) { return h.name === S.harness && h.installed; });
@@ -1438,6 +1450,246 @@
     });
   }
 
+  /* -- `:` harness mode (canned) ------------------------------------------
+     Port of internal/tui/update.go handleAIPromptKey + the aiPlanMsg/aiDoneMsg
+     handlers, and internal/aigit's Complete/Validate/Execute. The ONE thing that
+     is faked is the harness reply, because a browser has no AI and no git — the
+     fourth intentional divergence, and the page says so on screen. The confirm,
+     the refusal of a force-push, and stop-at-first-failure are all real logic. */
+
+  // aiNames is the completion vocabulary: repo names, group folders, branches.
+  function aiNames() {
+    var out = [], seen = {};
+    function add(n) { if (n && !seen[n]) { seen[n] = 1; out.push(n); } }
+    REPOS.forEach(function (r) { add(r.n); });
+    REPOS.forEach(function (r) { add(r.g); });
+    REPOS.forEach(function (r) { add(r.b); });
+    // Scripts complete WITH their @, like aigit.Context.Names does.
+    SCRIPTS.forEach(function (sc) { add("@" + sc.name); });
+    return out;
+  }
+
+  // Complete — port of aigit.Complete. Fills in as far as every candidate agrees
+  // (the longest common prefix), the way a shell does, then waits for the
+  // character that decides between them rather than picking one.
+  function aiComplete(s) {
+    var i = s.search(/[^ \t]*$/), word = s.slice(i);
+    if (!word) return "";
+    var lower = word.toLowerCase(), lcp = null;
+    aiNames().forEach(function (n) {
+      if (n.toLowerCase().indexOf(lower) !== 0) return;
+      if (lcp === null) { lcp = n; return; }
+      var j = 0;
+      while (j < lcp.length && j < n.length && lcp[j] === n[j]) j++;
+      lcp = lcp.slice(0, j);
+    });
+    if (lcp === null || lcp.length <= word.length) return "";
+    return lcp.slice(word.length);
+  }
+
+  // ghostSettle mirrors the Go's: the suggestion stays hidden until typing stops,
+  // so the line does not churn as it grows, shrinks and vanishes per keystroke.
+  var ghostSettle = 120;
+
+  function scheduleGhost() {
+    S.aiGhost = false;
+    var gen = ++S.aiGhostGen;
+    setTimeout(function () {
+      if (gen !== S.aiGhostGen || !S.aiPrompting) return; // superseded
+      S.aiGhost = true;
+      render();
+    }, ghostSettle);
+  }
+
+  function aiPromptLine() {
+    var lead = gp(S.harness + ":") + " " + esc(S.aiPrompt);
+    if (!S.aiGhost) return lead + "_";
+    var ghost = aiComplete(S.aiPrompt);
+    // Cursor mark dropped while a suggestion is up, so the word reads whole
+    // ("alpha") instead of split ("al_pha") — same as the Go.
+    return ghost ? lead + d(esc(ghost)) : lead + "_";
+  }
+
+  // dropWord / historyStep — ports of the Go helpers of the same name.
+  function dropWord(s) {
+    s = s.replace(/[ \t]+$/, "");
+    var i = Math.max(s.lastIndexOf(" "), s.lastIndexOf("\t"));
+    return i >= 0 ? s.slice(0, i + 1) : "";
+  }
+
+  function historyStep(d) {
+    if (!S.aiHistory.length) return;
+    if (S.aiHistIdx === S.aiHistory.length) S.aiDraft = S.aiPrompt;
+    var i = Math.min(Math.max(S.aiHistIdx + d, 0), S.aiHistory.length);
+    S.aiHistIdx = i;
+    S.aiPrompt = i === S.aiHistory.length ? S.aiDraft : S.aiHistory[i];
+    scheduleGhost();
+  }
+
+  function handleAIPromptKey(k) {
+    if (k === "Escape") { S.aiPrompting = false; S.aiPrompt = ""; S.aiGhost = false; return; }
+    // tab completes whether or not the ghost is up: it is an explicit request.
+    if (k === "Tab") { S.aiPrompt += aiComplete(S.aiPrompt); scheduleGhost(); return; }
+    if (k === "Backspace") {
+      // opt/cmd+backspace deletes a word, like the Go's alt+backspace.
+      S.aiPrompt = altKey ? dropWord(S.aiPrompt) : S.aiPrompt.slice(0, -1);
+      scheduleGhost(); return;
+    }
+    if (k === "ArrowUp") { historyStep(-1); return; }
+    if (k === "ArrowDown") { historyStep(1); return; }
+    if (k === "Enter") {
+      var req = S.aiPrompt.trim();
+      S.aiPrompting = false; S.aiPrompt = "";
+      if (req) {
+        if (!S.aiHistory.length || S.aiHistory[S.aiHistory.length - 1] !== req) S.aiHistory.push(req);
+        S.aiHistIdx = S.aiHistory.length;
+        askCannedHarness(req);
+      }
+      return;
+    }
+    // Unlike the filter, a space is kept — this is a sentence. (The Go handles
+    // tea.KeySpace for the same reason; see handleAIPromptKey there.)
+    if (k.length === 1) { S.aiPrompt += k; scheduleGhost(); }
+  }
+
+  // cannedPlan is the scripted stand-in for the harness. It recognises the shapes
+  // the real thing handles and falls back to a decline, so the demo never claims
+  // to understand something it doesn't.
+  function cannedPlan(req) {
+    var q = req.toLowerCase();
+    var cur = REPOS[Math.min(S.cursor, REPOS.length - 1)] || REPOS[0];
+    if (/mkdir|touch|ls |cd |rm |npm|install/.test(q)) {
+      return { steps: [], note: "manygit only runs git, so I can't do that here." };
+    }
+    if (/force/.test(q)) { // deliberately refused downstream, to show the guard
+      return { steps: [{ repo: cur.n, args: ["push", "--force"] }], note: "" };
+    }
+    var group = null;
+    REPOS.forEach(function (r) { if (q.indexOf(r.g.toLowerCase()) >= 0) group = r.g; });
+    var targets = group ? REPOS.filter(function (r) { return r.g === group; }) : [cur];
+    // An @reference means "read this file and do the part I asked for". The demo
+    // has no filesystem, so it recognises the reference and scopes to the group
+    // named in the request — enough to show the shape without pretending to read.
+    var ref = (req.match(/@([^\s]+)/) || [])[1];
+    if (ref) {
+      var picked = group ? targets : REPOS.filter(function (r) { return r.g === "apps"; });
+      return {
+        steps: picked.map(function (r) { return { repo: r.n, args: ["pull", "--ff-only"] }; }),
+        note: "from " + ref + " — only the git steps; its npm parts were left out."
+      };
+    }
+    if (/tag/.test(q)) {
+      return { steps: targets.map(function (r) {
+        return { repo: r.n, args: ["tag", "-a", "v1.2.0", "-m", "release v1.2.0"] };
+      }), note: "" };
+    }
+    if (/rebase/.test(q)) {
+      return { steps: targets.map(function (r) {
+        return { repo: r.n, args: ["rebase", "origin/main"] };
+      }), note: "" };
+    }
+    if (/merge/.test(q)) {
+      return { steps: targets.map(function (r) {
+        return { repo: r.n, args: ["merge", "origin/main"] };
+      }), note: "" };
+    }
+    if (/sync|pull|fetch|update/.test(q)) {
+      var steps = [];
+      targets.forEach(function (r) {
+        steps.push({ repo: r.n, args: ["fetch", "--quiet"] });
+        steps.push({ repo: r.n, args: ["pull", "--ff-only"] });
+      });
+      return { steps: steps, note: "" };
+    }
+    return { steps: [], note: "this demo only scripts a few examples — try \"sync everything in apps\"." }; // a statement, never a question
+  }
+
+  // aiValidate — port of aigit.Validate, trimmed to the checks the demo can hit.
+  function aiValidate(plan) {
+    var bad = [];
+    plan.steps.forEach(function (st) {
+      var a = st.args;
+      if (a[0] === "push" && a.some(function (x) { return /^(-f|--force|--force-with-lease)$/.test(x); })) {
+        bad.push({ step: st, reason: "force-pushes, which rewrites history on the remote" });
+      } else if (a[0] === "push" && a.some(function (x) { return /^(-d|--delete)$/.test(x) || x.charAt(0) === ":"; })) {
+        bad.push({ step: st, reason: "deletes a remote ref" });
+      }
+    });
+    return bad;
+  }
+
+  function askCannedHarness(req) {
+    S.outputRun++;
+    S.outputTitle = S.harness + ": " + req;
+    S.outputLines = [d("asking " + S.harness + "... (scripted in this demo)")];
+    S.outputOffset = 0;
+    S.outputRunning = true;
+    setBottomView("output");
+    var run = S.outputRun;
+    setTimeout(function () {
+      if (run !== S.outputRun) return;
+      var plan = cannedPlan(req);
+      S.outputRunning = false;
+      S.outputLines = [];
+      if (plan.note) S.outputLines.push(d(plan.note));
+      var bad = aiValidate(plan);
+      if (bad.length) {
+        S.outputLines.push(rd("refused — not run"));
+        bad.forEach(function (b) {
+          S.outputLines.push("  " + b.step.repo + "  git " + b.step.args.join(" "));
+          S.outputLines.push("  " + d("↳ " + b.reason));
+        });
+        setStatus(d("plan refused")); render(); return;
+      }
+      if (!plan.steps.length) {
+        if (!plan.note) S.outputLines.push(d("  nothing to do"));
+        // No thread: an empty plan ends the exchange rather than pausing it.
+        S.outputLines.push("");
+        S.outputLines.push(d("  press : to ask again"));
+        render(); return;
+      }
+      plan.steps.forEach(function (st) {
+        S.outputLines.push("  " + gp(st.repo) + "  git " + esc(st.args.join(" ")));
+      });
+      S.outputLines.push("");
+      S.outputLines.push(yl("run " + plan.steps.length + " command" + (plan.steps.length === 1 ? "" : "s") + "? [y/N]"));
+      S.confirmPlan = true;
+      S.aiPending = plan;
+      announce("Plan ready. Press y to run, any other key to cancel.");
+      render();
+    }, 700);
+  }
+
+  function handlePlanConfirm(k) {
+    var plan = S.aiPending;
+    S.confirmPlan = false; S.aiPending = null;
+    if (k !== "y") {
+      S.outputLines.push(d("cancelled — nothing ran"));
+      setStatus(d("plan cancelled"));
+      return;
+    }
+    S.outputRun++;
+    S.outputTitle = "running " + plan.steps.length + " command" + (plan.steps.length === 1 ? "" : "s");
+    S.outputLines = [];
+    S.outputRunning = true;
+    setBottomView("output");
+    // Step through them on a timer so it reads like work happening, and stop at
+    // the first failure exactly as aigit.Execute does.
+    var run = S.outputRun, i = 0;
+    (function step() {
+      if (run !== S.outputRun) return;
+      if (i >= plan.steps.length) {
+        S.outputRunning = false;
+        setStatus(gr(plan.steps.length + " command" + (plan.steps.length === 1 ? "" : "s") + " ok"));
+        render(); return;
+      }
+      var st = plan.steps[i++];
+      S.outputLines.push("  " + gp(st.repo) + "  git " + esc(st.args.join(" ")) + "  " + gr("ok"));
+      render();
+      setTimeout(step, 260);
+    })();
+  }
+
   function handleFilterKey(k) {
     if (k === "Escape") { S.filtering = false; S.filter = ""; }
     else if (k === "Enter") { S.filtering = false; }
@@ -1507,6 +1759,8 @@
   }
 
   function handleKey(k) {
+    if (S.aiPrompting) { handleAIPromptKey(k); return; }
+    if (S.confirmPlan) { handlePlanConfirm(k); return; }
     if (S.filtering) { handleFilterKey(k); return; }
     if (S.showHelp) { handleSettingsKey(k); return; }
     if (S.confirmDiscard) {
@@ -1656,6 +1910,11 @@
         break;
       }
       case "F": S.filterAttention = !S.filterAttention; S.cursor = 0; loadContext(); break;
+      case ":":
+        // Global, not pane-scoped: the request names its own scope.
+        S.aiPrompting = true; S.aiPrompt = ""; S.aiGhost = false;
+        announce("AI prompt open. Type a git request, tab completes, enter sends.");
+        break;
       case "/":
         S.filtering = true; S.filter = "";
         if (S.focus === "scripts") { S.filterPanel = "scripts"; S.scriptCursor = 0; }
@@ -1703,7 +1962,7 @@
 
   // Keys the browser would otherwise act on (scroll / quick-find / focus move).
   var SWALLOW = {
-    " ": 1, "/": 1, Tab: 1, Enter: 1, ArrowUp: 1, ArrowDown: 1, ArrowLeft: 1, ArrowRight: 1,
+    " ": 1, "/": 1, ":": 1, Tab: 1, Enter: 1, ArrowUp: 1, ArrowDown: 1, ArrowLeft: 1, ArrowRight: 1,
     Backspace: 1, Escape: 1
   };
 
@@ -1711,6 +1970,7 @@
   // than a parameter so handleKey keeps the single-string signature the keypad
   // buttons and the tests both call it with.
   var shiftTab = false;
+  var altKey = false;
 
   // idleEscape reports whether esc has nothing to do in the TUI right now. The
   // real tool binds esc only to backing out of the Changes pane; everywhere else
@@ -1739,6 +1999,9 @@
     }
 
     shiftTab = e.key === "Tab" && e.shiftKey;
+    // altKey/metaKey ride alongside like shiftTab does: handleKey keeps its
+    // single-string signature so the on-screen keypad can call it too.
+    altKey = e.altKey || e.metaKey;
     var k = e.key;
     if (SWALLOW[k] || k.length === 1) e.preventDefault();
     handleKey(k);

@@ -6,6 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"manygit/internal/aigit"
 	"manygit/internal/config"
 	"manygit/internal/discover"
 	"manygit/internal/gh"
@@ -182,6 +183,37 @@ type Model struct {
 	confirmDiscardFull bool
 	confirmDiscardPath string
 	confirmDiscardName string
+
+	// `:` harness mode. aiPrompt is the sentence being typed; aiNames is the
+	// completion vocabulary (repos, groups, branches) snapshotted when `:` opens,
+	// so the ghost text can't shift under a background fetch. Deliberately NOT
+	// reusing filter/filtering: those narrow every visible list, and typing a
+	// sentence would empty the panes behind the prompt.
+	aiPrompting bool
+	aiPrompt    string
+	aiNames     []string
+	// The ghost completion is debounced like the repo cursor is: while you are
+	// still typing it stays hidden, because a suggestion that changes length and
+	// blinks out on every keystroke reads as the line stuttering. It costs
+	// nothing to compute (measured: identical at 40 and 2000 names) — this is
+	// about the churn, not the clock.
+	aiGhost    bool // show the completion; set once typing settles
+	aiGhostGen int  // bumped per keystroke; a stale tick is ignored
+
+	// Prompt history, up/down. Deliberately in-memory only: it is a scratch
+	// convenience for the session you are in, and persisting half-finished
+	// instructions about someone's repos to disk is not worth the surprise.
+	// aiHistIdx == len(aiHistory) means "not browsing"; aiDraft holds what was
+	// being typed when browsing started, so down-arrow can put it back.
+	aiHistory []string
+	aiHistIdx int
+	aiDraft   string
+	aiRun     int // bumped per request; replies from a superseded one are dropped
+
+	// A validated plan waiting on y/N. Held whole so the confirm shows exactly
+	// what will run, and so nothing can be executed that wasn't displayed.
+	confirmPlan bool
+	pendingPlan aigit.Plan
 }
 
 // visibleScripts is the scripts list after the `/` filter (when it targets the

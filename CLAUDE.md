@@ -62,7 +62,7 @@ forget.
   `:root[data-theme=…]` block and a `:root[data-mode="light"][data-theme=…]` one
   — theme.go's accents are tuned for a dark terminal and none of them pass on
   paper unmodified. Darken hue-preserving and **measure**; don't eyeball.
-- **The demo intentionally diverges in exactly three places**, all because it runs
+- **The demo intentionally diverges in exactly four places**, all because it runs
   in a browser:
   1. `q` explains itself instead of quitting.
   2. `o` explains itself instead of spawning an editor.
@@ -73,8 +73,15 @@ forget.
      case is spent on blurring. If you rebind `esc` in the Go, find the demo a new
      exit **and say so in the `aria-label` and the visible cue** — an undisclosed
      escape hatch is the same as none.
+  4. **`:` replies from a canned script instead of an AI harness.** A browser has
+     neither `claude` nor git, so `cannedPlan()` recognises a few request shapes
+     and returns a plan for them. Everything *around* the fake is real and ported:
+     the input, the ghost-text completion, the validator refusing a force-push,
+     the confirm, and stop-at-first-failure. The page says the reply is scripted,
+     the same way it says the git is fake — if you extend `cannedPlan`, keep that
+     label true and never let it imply the model is actually running.
 
-  Keep all three, and keep them honest.
+  Keep all four, and keep them honest.
 - **`runInit()` is a port of `Init()`, not an animation.** First focus replays the
   real launch: every repo unloaded and immediately fetching, so a row goes
   `.` → `~` → its glyph as the local status read lands and then the fetch returns;

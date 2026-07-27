@@ -8,6 +8,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
+	"manygit/internal/aigit"
 	"manygit/internal/config"
 	"manygit/internal/git"
 	"manygit/internal/harness"
@@ -684,7 +685,22 @@ func (m Model) renderOutputView(contentW, innerH int) string {
 		return centerBlock(contentW, innerH, styleDim.Render(truncate(msg, contentW)))
 	}
 	start, end := window(len(m.outputLines), m.outputOffset, innerH)
-	return lipgloss.NewStyle().MaxWidth(contentW).Render(strings.Join(m.outputLines[start:end], "\n"))
+	// Wrap here rather than where the line was appended: only the renderer knows
+	// the pane's real width, and a line wrapped at append time is wrong the moment
+	// the terminal is resized. lipgloss's Width is ANSI-aware, so the styled lines
+	// survive being broken. Long harness notes are the reason this matters —
+	// truncating them lost the end of the sentence.
+	var out []string
+	for _, ln := range m.outputLines[start:end] {
+		out = append(out, strings.Split(lipgloss.NewStyle().Width(contentW).Render(ln), "\n")...)
+		if len(out) >= innerH {
+			break
+		}
+	}
+	if len(out) > innerH {
+		out = out[:innerH]
+	}
+	return strings.Join(out, "\n")
 }
 
 func (m Model) renderScripts(contentW, innerH int) string {
@@ -719,10 +735,13 @@ func (m Model) footer() string {
 		}
 	}
 	return styleDim.Render(
-		enter + " | z zoom | g graph | n news | t tags | F changed | s sync | p push | d/D discard | o open | r refetch | ? help | q quit")
+		enter + " | z zoom | g graph | n news | t tags | F changed | s sync | p push | d/D discard | o open | r refetch | : ai | ? help | q quit")
 }
 
 func (m Model) statusOrFilterLine() string {
+	if m.aiPrompting {
+		return m.aiPromptLine()
+	}
 	if m.filtering {
 		return styleYellow.Render("/" + m.filter + "_")
 	}
@@ -731,6 +750,45 @@ func (m Model) statusOrFilterLine() string {
 	}
 	return m.footer()
 }
+
+// aiPromptLine renders the `:` input: the harness's own name as the prompt, what
+// you have typed, the cursor, then the completion in --dim behind it.
+//
+// The ghost is dropped rather than truncated when it will not fit. This line
+// shares the bottom bar with the harness and github indicators, so at the
+// documented 80-col minimum there are only ~44 cells here — and half a completion
+// is worse than none, because tab would then insert something you cannot see.
+func (m Model) aiPromptLine() string {
+	name := m.cfg.Harness
+	if name == "" {
+		name = "ai"
+	}
+	lead := styleGroup.Render(name+":") + " " + m.aiPrompt
+	head := lead + "_"
+	if !m.aiGhost {
+		return head // still typing — see scheduleGhost
+	}
+	ghost := aigit.Complete(m.aiNames, m.aiPrompt)
+	if ghost == "" {
+		return head
+	}
+	budget := m.width
+	if budget <= 0 {
+		budget = minTermW
+	}
+	if lipgloss.Width(head)+len(ghost) > budget-aiPromptReserve {
+		return head
+	}
+	// The cursor mark is dropped while a suggestion is up, so the word reads whole
+	// ("alpha" in dim tail) instead of being split down the middle ("al_pha").
+	// The dim continuation is itself the cursor cue, which is how shell
+	// autosuggestions render it.
+	return lead + styleDim.Render(ghost)
+}
+
+// aiPromptReserve is the room the bottom bar's right-hand indicators (harness,
+// github) need; the prompt and its ghost live in what is left.
+const aiPromptReserve = 34
 
 // helpView renders the full-screen overlay: the Settings radio-list, or the
 // keybindings + status reference when toggled with tab.
@@ -1067,6 +1125,7 @@ func (m Model) keysColumns() (leftCol, rightCol []string) {
 		kr("t", "toggle each repo's latest tag inline"),
 		kr("F", "only changed / unsynced repos"),
 		kr("/", "filter the focused list"),
+		kr(":", "AI git — @file, tab completes, up/down recalls"),
 		kr("esc", "back out one layer of state"),
 		"",
 		styleGroup.Render("GitHub PRs (4)") + styleDim.Render("   (needs gh)"),

@@ -9,6 +9,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"manygit/internal/aigit"
 	"manygit/internal/config"
 	"manygit/internal/discover"
 	"manygit/internal/harness"
@@ -251,6 +252,84 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.changeShowDiff = true
 		}
 		return m, nil
+	case aiGhostMsg:
+		if msg.gen == m.aiGhostGen && m.aiPrompting {
+			m.aiGhost = true
+		}
+		return m, nil
+
+	case aiPlanMsg:
+		if msg.run != m.aiRun {
+			return m, nil // a superseded request; its reply is no longer wanted
+		}
+		m.outputRunning = false
+		m.outputLines = nil
+		m.outputOffset = 0
+		m.appendOutput("") // top margin: the block shouldn't hug the border
+		if msg.err != nil {
+			m.appendAI(styleRed.Render("harness error"))
+			m.appendAI(styleDim.Render(msg.err.Error()))
+			return m, m.setStatus("no plan — see Output")
+		}
+		if msg.plan.Note != "" {
+			m.appendAI(styleDim.Render(msg.plan.Note))
+		}
+		// Refused steps never reach the confirm: showing a plan and then blocking
+		// half of it on y would be worse than refusing it whole.
+		if bad := aigit.Validate(msg.plan); len(bad) > 0 {
+			m.appendAI(styleRed.Render("refused — not run"))
+			for _, r := range bad {
+				m.appendAI(r.Step.Repo + "  " + r.Step.Command())
+				m.appendAI(styleDim.Render("  ↳ " + r.Reason))
+			}
+			return m, m.setStatus("plan refused")
+		}
+		if len(msg.plan.Steps) == 0 {
+			if msg.plan.Note == "" {
+				m.appendAI(styleDim.Render("nothing to do"))
+			}
+			// Each request is answered once and nothing is carried over, so an
+			// empty plan is the end of the exchange, not a pause in one. Say how
+			// to start another rather than leaving the user waiting for a reply.
+			m.appendOutput("")
+			m.appendAI(styleDim.Render("press : to ask again"))
+			return m, nil
+		}
+		for _, s := range msg.plan.Steps {
+			m.appendAI(styleGroup.Render(s.Repo) + "  " + s.Command())
+		}
+		m.appendOutput("")
+		m.appendAI(styleYellow.Render("run " + plural(len(msg.plan.Steps), "command") + "? [y/N]"))
+		m.confirmPlan = true
+		m.pendingPlan = msg.plan
+		return m, nil
+
+	case aiDoneMsg:
+		if msg.run != m.aiRun {
+			return m, nil
+		}
+		m.outputRunning = false
+		ok, failed := 0, 0
+		for _, r := range msg.results {
+			switch {
+			case r.Skipped:
+				m.appendAI(styleDim.Render(r.Step.Repo + "  skipped"))
+			case r.Err != nil:
+				failed++
+				m.appendAI(styleGroup.Render(r.Step.Repo) + "  " + r.Step.Command() + "  " + styleRed.Render("FAILED"))
+				m.appendAI(styleDim.Render("  " + r.Err.Error()))
+			default:
+				ok++
+				m.appendAI(styleGroup.Render(r.Step.Repo) + "  " + r.Step.Command() + "  " + styleGreen.Render("ok"))
+			}
+		}
+		// Whatever ran changed the repos, so re-read them rather than leaving the
+		// list showing pre-command branches and counts.
+		if failed > 0 {
+			return m, tea.Batch(m.setStatus("stopped after a failure — see Output"), m.refetchAllCmd())
+		}
+		return m, tea.Batch(m.setStatus(plural(ok, "command")+" ok"), m.refetchAllCmd())
+
 	case scriptOutMsg:
 		stale := msg.run != m.outputRun // a superseded run (user started another script)
 		if msg.done {
@@ -346,6 +425,18 @@ func ctxDebounceCmd(gen int) tea.Cmd {
 	return tea.Tick(ctxSettle, func(time.Time) tea.Msg { return ctxDebounceMsg{gen: gen} })
 }
 
+// ghostSettle is how long the `:` prompt must sit still before the completion is
+// offered. Same idea and same interval as ctxSettle: mid-burst suggestions are
+// noise, a pause means you have stopped to think.
+const ghostSettle = 120 * time.Millisecond
+
+// aiGhostMsg reveals the completion if no key has landed since it was scheduled.
+type aiGhostMsg struct{ gen int }
+
+func aiGhostCmd(gen int) tea.Cmd {
+	return tea.Tick(ghostSettle, func(time.Time) tea.Msg { return aiGhostMsg{gen: gen} })
+}
+
 // contextCmd is loadContextCmd for moves the user drives continuously — the
 // repo cursor (j/k) and typing a repo filter, both of which re-pick the
 // highlighted repo on every keystroke.
@@ -430,6 +521,15 @@ func (m Model) refetchAllCmd() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
+// aiIndent is the left margin every `:` line shares. Script output is raw and
+// starts at the edge, but the AI block is a formatted report and reads better
+// inset — as long as EVERY line agrees. Mixing indented steps with flush-left
+// headings is what made the pane look ragged.
+const aiIndent = "  "
+
+// appendAI adds one line of the `:` report at the shared margin.
+func (m *Model) appendAI(line string) { m.appendOutput(aiIndent + line) }
+
 // appendOutput adds a line to the Output view, keeping the view pinned to the
 // tail (auto-follow) unless the user has scrolled up.
 func (m *Model) appendOutput(line string) {
@@ -444,8 +544,31 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.filtering {
 		return m.handleFilterKey(msg)
 	}
+	// Above the overlay guards on purpose: a stray ? or g while you are typing a
+	// sentence must land in the sentence, not open a full-screen overlay.
+	if m.aiPrompting {
+		return m.handleAIPromptKey(msg)
+	}
 	if m.showHelp {
 		return m.handleSettingsKey(msg)
+	}
+	// Above confirmDiscard, which swallows any key unconditionally — this keeps
+	// ownership of y/N deterministic if both were ever armed at once.
+	if m.confirmPlan {
+		plan := m.pendingPlan
+		m.confirmPlan = false
+		m.pendingPlan = aigit.Plan{}
+		if msg.String() == "y" {
+			m.aiRun++
+			m.outputTitle = "running " + plural(len(plan.Steps), "command")
+			m.outputLines = nil
+			m.outputOffset = 0
+			m.outputRunning = true
+			m.setBottomView(bvOutput)
+			return m, aiExecCmd(m.root, m.repoDirs(), plan, m.aiRun)
+		}
+		m.appendAI(styleDim.Render("cancelled — nothing ran"))
+		return m, m.setStatus("plan cancelled")
 	}
 	if m.confirmDiscard {
 		full, path, name := m.confirmDiscardFull, m.confirmDiscardPath, m.confirmDiscardName
@@ -737,6 +860,15 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.filterPanel = panelRepos
 			m.cursor = 0
 		}
+	case ":":
+		// Plain-English git. Unlike `/` this is global, not scoped to a pane — the
+		// request names its own scope, defaulting to the repo under the cursor.
+		if !harness.Available(m.cfg.Harness) {
+			return m, m.setStatus("no AI harness — install claude or codex, or set one in ? settings")
+		}
+		m.aiPrompting = true
+		m.aiPrompt = ""
+		m.aiNames = m.aiContext().Names() // snapshot: ghost text must not shift under a fetch
 	case "f":
 		if r := m.currentVisible(vis); r != nil && !r.fetching {
 			r.fetching = true
@@ -832,6 +964,128 @@ func (m Model) armDiscard(vis []*repoVM, full bool) (tea.Model, tea.Cmd) {
 		prompt = "discard " + name + " + untracked files?  y = confirm, any key = cancel"
 	}
 	return m, m.setStatus(styleRed.Render(prompt))
+}
+
+// handleAIPromptKey drives the `:` input. It switches on msg.Type and ignores
+// everything else, the same closed-set approach handleFilterKey uses — that is
+// what stops tab from cycling panes, j/k from scrolling, and 1-7 from switching
+// panes while you are mid-sentence.
+//
+// Two deliberate divergences from handleFilterKey, both because this is prose
+// rather than a needle:
+//
+//   - tea.KeySpace is handled. bubbletea re-types a lone space from KeyRunes to
+//     KeySpace, so a handler that only takes KeyRunes silently drops every space
+//     — which is exactly why `/` cannot contain one. A sentence is mostly spaces.
+//   - backspace trims a rune, not a byte, so deleting a non-ASCII character does
+//     not leave half of it behind.
+func (m Model) handleAIPromptKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyEsc:
+		m.aiPrompting = false
+		m.aiPrompt = ""
+		return m, nil
+	case tea.KeyTab:
+		// tab completes whether or not the ghost is currently shown: it is an
+		// explicit request, and the match is the same one the ghost would offer.
+		m.aiPrompt += aigit.Complete(m.aiNames, m.aiPrompt)
+		return m, m.scheduleGhost()
+	case tea.KeyBackspace:
+		// alt+backspace deletes a word, the readline convention every shell uses.
+		// macOS sends it for opt+backspace; ctrl+w below is the same thing for
+		// terminals that don't.
+		if msg.Alt {
+			m.aiPrompt = dropWord(m.aiPrompt)
+		} else if r := []rune(m.aiPrompt); len(r) > 0 {
+			m.aiPrompt = string(r[:len(r)-1])
+		}
+		return m, m.scheduleGhost()
+	case tea.KeyCtrlW:
+		m.aiPrompt = dropWord(m.aiPrompt)
+		return m, m.scheduleGhost()
+	case tea.KeyCtrlU:
+		// Clear the line. cmd+backspace does this in a text field, but terminals
+		// don't transmit cmd at all — they send ^U if configured to send anything,
+		// so this is the binding that can actually be reached.
+		m.aiPrompt = ""
+		return m, m.scheduleGhost()
+	case tea.KeyUp:
+		return m, m.historyStep(-1)
+	case tea.KeyDown:
+		return m, m.historyStep(+1)
+	case tea.KeyEnter:
+		req := strings.TrimSpace(m.aiPrompt)
+		m.aiPrompting = false
+		m.aiPrompt = ""
+		if req == "" {
+			return m, nil
+		}
+		// Keep it for up-arrow, without stacking duplicates of the same request.
+		if n := len(m.aiHistory); n == 0 || m.aiHistory[n-1] != req {
+			m.aiHistory = append(m.aiHistory, req)
+		}
+		m.aiHistIdx = len(m.aiHistory)
+		h, ok := harness.ByName(m.cfg.Harness)
+		if !ok || !h.Installed() {
+			return m, m.setStatus("no AI harness available")
+		}
+		m.aiRun++
+		m.outputTitle = m.cfg.Harness + ": " + req
+		m.outputLines = nil
+		m.outputOffset = 0
+		m.outputRunning = true
+		m.setBottomView(bvOutput)
+		m.appendOutput("")
+		m.appendAI(styleDim.Render("asking " + m.cfg.Harness + "..."))
+		return m, aiAskCmd(h, m.harnessDirOrRoot(), m.aiContext(), req, m.aiRun)
+	case tea.KeyRunes, tea.KeySpace:
+		m.aiPrompt += string(msg.Runes)
+		return m, m.scheduleGhost()
+	}
+	return m, nil
+}
+
+// historyStep walks the prompt history: -1 is older, +1 newer. Stepping past the
+// newest entry restores whatever was being typed when browsing started, so
+// up-then-down is always a round trip rather than a way to lose your sentence.
+func (m *Model) historyStep(d int) tea.Cmd {
+	if len(m.aiHistory) == 0 {
+		return nil
+	}
+	if m.aiHistIdx == len(m.aiHistory) {
+		m.aiDraft = m.aiPrompt // entering the history; remember the draft
+	}
+	i := m.aiHistIdx + d
+	if i < 0 {
+		i = 0
+	}
+	if i > len(m.aiHistory) {
+		i = len(m.aiHistory)
+	}
+	m.aiHistIdx = i
+	if i == len(m.aiHistory) {
+		m.aiPrompt = m.aiDraft
+	} else {
+		m.aiPrompt = m.aiHistory[i]
+	}
+	return m.scheduleGhost()
+}
+
+// dropWord removes the last whitespace-separated word, and any spaces before it.
+func dropWord(s string) string {
+	s = strings.TrimRight(s, " \t")
+	if i := strings.LastIndexAny(s, " \t"); i >= 0 {
+		return s[:i+1]
+	}
+	return ""
+}
+
+// scheduleGhost hides the completion and re-arms it. Every keystroke bumps the
+// generation, so only the tick belonging to the LAST key ever reveals anything.
+func (m *Model) scheduleGhost() tea.Cmd {
+	m.aiGhost = false
+	m.aiGhostGen++
+	return aiGhostCmd(m.aiGhostGen)
 }
 
 func (m Model) handleFilterKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
