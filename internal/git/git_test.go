@@ -504,6 +504,120 @@ func TestGraphLog_ReturnsCommits(t *testing.T) {
 	}
 }
 
+// Fingerprint is the cheap "did this repo move?" probe the TUI polls while a
+// script runs, so it can re-stat only the repos a script actually touched
+// instead of all of them (a full Status() sweep is 6-8 git subprocesses per
+// repo). It must move for every git-level change a script can make.
+func TestFingerprint_DetectsGitOperations(t *testing.T) {
+	clone, bare := initRepoWithRemote(t)
+	gitCmd(t, clone, "branch", "feature")
+
+	prev := Fingerprint(clone)
+	if prev == 0 {
+		t.Fatal("Fingerprint of a real repo should be non-zero")
+	}
+
+	steps := []struct {
+		name string
+		do   func()
+	}{
+		{"checkout a branch", func() { gitCmd(t, clone, "checkout", "-q", "feature") }},
+		{"create a lightweight tag", func() { gitCmd(t, clone, "tag", "v1.2.3") }},
+		{"commit", func() {
+			if err := os.WriteFile(filepath.Join(clone, "n.txt"), []byte("n\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			gitCmd(t, clone, "add", ".")
+			gitCmd(t, clone, "commit", "-q", "-m", "n")
+		}},
+		{"pack refs", func() { gitCmd(t, clone, "pack-refs", "--all") }},
+		{"create a branch", func() { gitCmd(t, clone, "branch", "another") }},
+		{"fetch an advanced origin", func() {
+			advanceOrigin(t, bare)
+			if err := Fetch(clone); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	}
+	for _, s := range steps {
+		s.do()
+		got := Fingerprint(clone)
+		if got == prev {
+			t.Errorf("Fingerprint did not move after %s — the repo's row would stay stale", s.name)
+		}
+		prev = got
+	}
+}
+
+// Nothing changed means no re-stat. If the fingerprint drifted on its own, every
+// poll would spawn a full Status() for every repo and the probe would be worse
+// than the sweep it replaces.
+func TestFingerprint_StableWhenNothingChanges(t *testing.T) {
+	dir := initRepo(t)
+	first := Fingerprint(dir)
+	for i := 0; i < 5; i++ {
+		if got := Fingerprint(dir); got != first {
+			t.Fatalf("call %d returned %d, want the stable %d", i+2, got, first)
+		}
+	}
+}
+
+// Deliberately git-level only: it stats a fixed handful of paths inside .git and
+// never walks the working tree, which is what makes it ~350x cheaper than
+// Status(). The cost is that a script editing files without running git (an
+// `npm install`, say) changes the dirty count invisibly — which is exactly why
+// the TUI also does one full re-stat when the script finishes. Widening this to
+// catch working-tree edits would mean walking every repo's files on every poll.
+func TestFingerprint_IgnoresWorkingTreeEdits(t *testing.T) {
+	dir := initRepo(t)
+	before := Fingerprint(dir)
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("edited\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "untracked.txt"), []byte("new\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := Fingerprint(dir); got != before {
+		t.Errorf("Fingerprint moved on a working-tree-only edit (%d -> %d); "+
+			"the probe is meant to stay git-level and cheap", before, got)
+	}
+}
+
+// In a linked worktree .git is a FILE holding "gitdir: <path>", not a directory.
+// Stat'ing that file alone would produce a fingerprint that never moves, so the
+// worktree's row would silently never refresh — worse than not probing at all,
+// because nothing signals that it's stale.
+func TestFingerprint_LinkedWorktree(t *testing.T) {
+	main := initRepo(t)
+	wt := filepath.Join(t.TempDir(), "wt")
+	gitCmd(t, main, "worktree", "add", "-q", "-b", "side", wt)
+
+	fi, err := os.Stat(filepath.Join(wt, ".git"))
+	if err != nil || fi.IsDir() {
+		t.Fatalf("expected .git to be a file in a linked worktree, got dir=%v err=%v", fi != nil && fi.IsDir(), err)
+	}
+	before := Fingerprint(wt)
+	if before == 0 {
+		t.Fatal("Fingerprint of a linked worktree should be non-zero")
+	}
+	gitCmd(t, wt, "checkout", "-q", "-b", "side2")
+	if got := Fingerprint(wt); got == before {
+		t.Error("Fingerprint did not move after a checkout in a linked worktree")
+	}
+}
+
+// A path that isn't a repo (deleted mid-run, or never one) returns 0 rather than
+// erroring — the probe runs on every repo every tick and must not be a failure
+// path.
+func TestFingerprint_MissingRepoIsZero(t *testing.T) {
+	if got := Fingerprint(filepath.Join(t.TempDir(), "nope")); got != 0 {
+		t.Errorf("Fingerprint of a missing repo = %d, want 0", got)
+	}
+	if got := Fingerprint(t.TempDir()); got != 0 {
+		t.Errorf("Fingerprint of a non-repo directory = %d, want 0", got)
+	}
+}
+
 func TestParseSlug(t *testing.T) {
 	cases := map[string]string{
 		"https://github.com/rabeeh-ta/manygit.git": "rabeeh-ta/manygit",

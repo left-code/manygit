@@ -99,7 +99,8 @@ func TestNewsCache_LoadFreshIntoModel(t *testing.T) {
 	cfg.NewsDays = 3
 	sig := repoSig(New(cfg, "", repos, nil).repos) // deterministic for this repo set
 
-	saveNewsCache(cachedNews{CachedAt: time.Now(), Days: 3, Sig: sig, Headlines: []string{"shipped X", "fixed Y"}})
+	saveNewsCache(cachedNews{CachedAt: time.Now(), Days: 3, Sig: sig, Format: newsFormat,
+		Headlines: []string{"shipped X", "fixed Y"}})
 
 	m := New(cfg, "", repos, nil)
 	if len(m.newsFeed) != 2 || m.newsFeed[0] != "shipped X" {
@@ -123,9 +124,10 @@ func TestNewsCache_IgnoredWhenStaleOrMismatched(t *testing.T) {
 	heads := []string{"x"}
 
 	for name, c := range map[string]cachedNews{
-		"stale":       {CachedAt: time.Now().Add(-5 * time.Hour), Days: 3, Sig: sig, Headlines: heads},
-		"wrong-days":  {CachedAt: time.Now(), Days: 7, Sig: sig, Headlines: heads},
-		"wrong-repos": {CachedAt: time.Now(), Days: 3, Sig: "deadbeef", Headlines: heads},
+		"stale":       {CachedAt: time.Now().Add(-5 * time.Hour), Days: 3, Sig: sig, Format: newsFormat, Headlines: heads},
+		"wrong-days":  {CachedAt: time.Now(), Days: 7, Sig: sig, Format: newsFormat, Headlines: heads},
+		"wrong-repos": {CachedAt: time.Now(), Days: 3, Sig: "deadbeef", Format: newsFormat, Headlines: heads},
+		"old-format":  {CachedAt: time.Now(), Days: 3, Sig: sig, Headlines: heads},
 	} {
 		saveNewsCache(c)
 		if m := New(cfg, "", repos, nil); len(m.newsFeed) != 0 {
@@ -138,8 +140,8 @@ func TestNewsCache_IgnoredWhenStaleOrMismatched(t *testing.T) {
 // can't grow with every refresh.
 func TestNewsCache_Overwrites(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
-	saveNewsCache(cachedNews{CachedAt: time.Now(), Days: 3, Sig: "a", Headlines: []string{"one"}})
-	saveNewsCache(cachedNews{CachedAt: time.Now(), Days: 3, Sig: "a", Headlines: []string{"two", "three"}})
+	saveNewsCache(cachedNews{CachedAt: time.Now(), Days: 3, Sig: "a", Format: newsFormat, Headlines: []string{"one"}})
+	saveNewsCache(cachedNews{CachedAt: time.Now(), Days: 3, Sig: "a", Format: newsFormat, Headlines: []string{"two", "three"}})
 	c, ok := loadNewsCache()
 	if !ok || len(c.Headlines) != 2 || c.Headlines[0] != "two" {
 		t.Fatalf("cache should hold only the latest write, got %+v ok=%v", c, ok)

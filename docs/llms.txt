@@ -42,7 +42,7 @@ It walks the folder three levels deep by default, skips `node_modules`, `vendor`
 - `1` Repos — every repo, its current branch, and its status
 - `2` Scripts — `*.sh` files near the root, runnable in place
 - `3` Branches — the highlighted repo's local and remote branches
-- `4` PRs — GitHub pull requests (needs the `gh` CLI, 2.12+)
+- `4` PRs — GitHub pull requests (needs the `gh` CLI, signed in)
 - `5` Graph — a colored commit graph for the highlighted repo
 - `6` Changes — changed files of the selected commit, with in-place diffs
 - `7` Output — live output of the last script run
@@ -98,8 +98,20 @@ Actions apply to the repo under the `>` cursor.
   alone — there is no conversation, so it never asks a question: it picks the most
   likely reading and you approve or decline the commands.
 - GitHub PRs: with the `gh` CLI signed in, `4` lists your open PRs and the ones
-  awaiting your review. `enter` checks the PR's branch out in the matching local
-  clone via `gh pr checkout`.
+  awaiting your review. It opens on whichever of the two has something in it —
+  yours normally, review requests when yours are empty and reviews are waiting;
+  picking a list with `m` then sticks. Each PR takes two lines: number, author
+  and title, then the repo, the branch that clone is currently on, and
+  `base ← head` — what merges into what. `enter` checks the PR's branch out in
+  the matching local clone via `gh pr checkout`, and leaves the focus, the PR
+  cursor and the repo cursor exactly where they were, because a PR usually spans
+  several repos.
+- Live repo state: the Repos pane follows what happens to the repos rather than
+  waiting to be refreshed. Checking out a PR updates that repo's row in place,
+  and while a script or a `:` plan is running manygit re-reads the repos it
+  touches as it touches them, then re-reads all of them once when the run ends.
+  The Output pane has one owner at a time: starting a script supersedes a pending
+  `:` reply and vice versa, so neither can write into the other's output.
 - AI news feed: with `claude` or `codex` on PATH, the top bar summarizes recent
   commits across every repo in English. Cached four hours.
 - Themes: `default`, `serika_dark`, `dracula`, `nord`, `catppuccin`, `8008`,

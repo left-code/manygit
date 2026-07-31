@@ -12,6 +12,7 @@ import (
 	"manygit/internal/aigit"
 	"manygit/internal/config"
 	"manygit/internal/discover"
+	"manygit/internal/git"
 	"manygit/internal/harness"
 )
 
@@ -87,6 +88,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						CachedAt:  m.newsCachedAt,
 						Days:      m.cfg.NewsDays,
 						Sig:       repoSig(m.repos),
+						Format:    newsFormat,
 						Headlines: msg.headlines,
 					})
 				}
@@ -177,6 +179,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.prLoaded = true
 		m.prErr = msg.err
+		m.autoPickPRList() // the lists arrive after `4` is usually pressed
 		if m.prCursor >= len(m.visiblePRs()) {
 			m.prCursor = 0
 		}
@@ -188,8 +191,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.setStatus(styleRed.Render("checkout PR #" + num + " in " + name + " failed: " + msg.err.Error()))
 		}
 		exp := m.setStatus(styleGreen.Render("checked out PR #" + num + " in " + name))
-		m.focusRepoByPath(msg.path) // land on that repo's branches, ready to review
-		return m, tea.Batch(exp, statusCmd(msg.path), m.loadContextCmd())
+		// Deliberately nothing moves: a PR spans several repos and you check out
+		// two or three in a row, so stealing focus to that repo's Branches pane
+		// would break the walk. statusCmd redraws its row in place instead.
+		return m, tea.Batch(exp, statusCmd(msg.path), m.loadContextIfCurrent(msg.path))
 	case changelogMsg:
 		// Fail soft: an error, or no releases with any notes, just means no
 		// screen — the app is already up behind it. Mark it seen either way so a
@@ -309,6 +314,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.outputRunning = false
+		m.probing = false // the next probe tick finds it disarmed and stops
 		ok, failed := 0, 0
 		for _, r := range msg.results {
 			switch {
@@ -330,6 +336,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Batch(m.setStatus(plural(ok, "command")+" ok"), m.refetchAllCmd())
 
+	case repoProbeMsg:
+		// Only the current run's ticks count, and only while the probe is armed —
+		// bubbletea can't cancel a pending Tick, so declining to re-arm is what
+		// stops it.
+		if msg.run != m.outputRun || !m.probing {
+			return m, nil
+		}
+		cmds := []tea.Cmd{repoProbeCmd(m.outputRun, m.repoPaths())}
+		for _, path := range m.probeChanged(msg.fps) {
+			cmds = append(cmds, statusCmd(path), m.loadContextIfCurrent(path))
+		}
+		return m, tea.Batch(cmds...)
 	case scriptOutMsg:
 		stale := msg.run != m.outputRun // a superseded run (user started another script)
 		if msg.done {
@@ -337,13 +355,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil // superseded run finished draining; drop it silently
 			}
 			m.outputRunning = false
+			m.probing = false // the next tick finds it disarmed and stops
 			var s string
 			if msg.err != nil {
 				s = styleRed.Render("script " + m.outputTitle + " failed: " + msg.err.Error())
 			} else {
 				s = styleGreen.Render("ran " + m.outputTitle)
 			}
-			return m, m.setStatus(s)
+			// A script can change anything, in any repo — and it can dirty a tree
+			// without ever invoking git, which the fingerprint probe is blind to by
+			// design. So the run ends with one full local re-stat rather than
+			// leaving the pane stale until someone presses r.
+			return m, tea.Batch(m.setStatus(s), m.restatAllCmd(), m.loadContextCmd())
 		}
 		if !stale {
 			m.appendOutput(msg.line)
@@ -559,13 +582,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.confirmPlan = false
 		m.pendingPlan = aigit.Plan{}
 		if msg.String() == "y" {
-			m.aiRun++
-			m.outputTitle = "running " + plural(len(plan.Steps), "command")
-			m.outputLines = nil
-			m.outputOffset = 0
-			m.outputRunning = true
+			m.takeOutputPane("running " + plural(len(plan.Steps), "command"))
 			m.setBottomView(bvOutput)
-			return m, aiExecCmd(m.root, m.repoDirs(), plan, m.aiRun)
+			// These are git commands against the repos, so the Repos pane follows
+			// them live exactly as it follows a script.
+			return m, tea.Batch(aiExecCmd(m.root, m.repoDirs(), plan, m.aiRun), m.startRepoProbe())
 		}
 		m.appendAI(styleDim.Render("cancelled — nothing ran"))
 		return m, m.setStatus("plan cancelled")
@@ -602,7 +623,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "n", "esc":
 			m.showNews = false
 		case "down", "j":
-			if m.newsOffset < len(m.newsFeed)-1 {
+			// By RENDERED line, not by headline: an entry is a heading plus a
+			// wrapped explanation plus a gap, so clamping to len(newsFeed) would
+			// stop j well short of the bottom.
+			if m.newsOffset < len(m.newsLines())-1 {
 				m.newsOffset++
 			}
 		case "up", "k":
@@ -796,6 +820,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// key, scoped to the PRs view so it stays unbound everywhere else.
 		if m.focus == panelBranches && m.topView == tvPRs {
 			m.prShowReview = !m.prShowReview
+			m.prChosen = true // an explicit pick; autoPickPRList stops overriding
 			m.prCursor = 0
 		}
 	case "esc":
@@ -832,8 +857,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, m.keepCursorOn(cur)
 		}
 	case "o":
-		if r := m.currentVisible(vis); r != nil {
-			return m, openRepoCmd(m.cfg.OpenCmd, r.repo.Path)
+		path, missing := m.openTarget()
+		switch {
+		case missing != "":
+			return m, m.setStatus(styleOrange.Render(noLocalClone(missing, "open")))
+		case path != "":
+			return m, openRepoCmd(m.cfg.OpenCmd, path)
 		}
 	case "F":
 		// Toggle the "needs attention" view: only repos with changes / ahead / behind.
@@ -1029,11 +1058,9 @@ func (m Model) handleAIPromptKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if !ok || !h.Installed() {
 			return m, m.setStatus("no AI harness available")
 		}
-		m.aiRun++
-		m.outputTitle = m.cfg.Harness + ": " + req
-		m.outputLines = nil
-		m.outputOffset = 0
-		m.outputRunning = true
+		// No probe here: asking the harness a question runs nothing against the
+		// repos, so there is nothing for the Repos pane to follow.
+		m.takeOutputPane(m.cfg.Harness + ": " + req)
 		m.setBottomView(bvOutput)
 		m.appendOutput("")
 		m.appendAI(styleDim.Render("asking " + m.cfg.Harness + "..."))
@@ -1266,6 +1293,31 @@ func (m *Model) setTopView(v topView) {
 		m.clearPRFilter() // leaving the PRs sub-view drops its `/` filter
 	}
 	m.topView = v
+	if v == tvPRs {
+		m.autoPickPRList()
+	}
+}
+
+// autoPickPRList points the PRs pane at whichever list has something in it: your
+// own PRs normally, review requests when yours are empty and reviews are
+// waiting. Opening onto an empty list while nine PRs sit in the other one wastes
+// the keypress — you read "No open PRs authored by you", press `m`, and only
+// then see the work. With nothing in either list it stays on your own, so the
+// pane says the more useful of the two empty messages.
+//
+// It runs both when the pane opens and when the lists land, because they load
+// async: `4` is normally pressed while both are still empty, so picking only at
+// open time would never fire in the case that matters. Once the user has chosen
+// with `m` it stops entirely — an explicit choice has to outlive an `r` refresh
+// that would otherwise pull the pane out from under them.
+func (m *Model) autoPickPRList() {
+	if m.prChosen {
+		return
+	}
+	if want := len(m.prMine) == 0 && len(m.prReview) > 0; want != m.prShowReview {
+		m.prShowReview = want
+		m.prCursor = 0
+	}
 }
 
 // setBottomView focuses the bottom slot and shows v, with the same side effects:
@@ -1345,6 +1397,41 @@ func (m *Model) clearPRFilter() {
 	}
 }
 
+// noLocalClone is the one message for "this PR's repo isn't among the repos
+// manygit scanned". enter and o fail for exactly that reason, so they say
+// exactly this, differing only in the verb — two wordings for one condition
+// would teach the reader they are different problems. It names the tree rather
+// than the pane, because that is what has to change to fix it: clone the repo
+// under the root, or point manygit at a root that has it.
+func noLocalClone(slug, verb string) string {
+	return slug + " isn't in this tree — no local clone to " + verb
+}
+
+// openTarget resolves what `o` should open. In the PRs pane that is the
+// highlighted PR's local clone, not whatever the Repos cursor happens to be on:
+// you act on what you are looking at. Everywhere else it is the cursor repo.
+//
+// Returns (path, "") when there is something to open, ("", slug) when the
+// highlighted PR has no local clone — so the caller can name the missing repo —
+// and ("", "") when there is nothing under the cursor at all.
+func (m Model) openTarget() (path, missingSlug string) {
+	if m.focus == panelBranches && m.topView == tvPRs {
+		prs := m.visiblePRs()
+		if m.prCursor < 0 || m.prCursor >= len(prs) {
+			return "", ""
+		}
+		pr := prs[m.prCursor]
+		if r := m.repoBySlug(pr.RepoSlug); r != nil {
+			return r.repo.Path, ""
+		}
+		return "", pr.RepoSlug
+	}
+	if r := m.currentVisible(m.visibleRepos()); r != nil {
+		return r.repo.Path, ""
+	}
+	return "", ""
+}
+
 // repoBySlug finds the discovered repo whose origin remote is slug (case-
 // insensitive), or nil. Uses the slug computed at status-load time, so it does no
 // git exec on the keystroke.
@@ -1373,7 +1460,7 @@ func (m *Model) checkoutPR() tea.Cmd {
 	pr := prs[m.prCursor]
 	r := m.repoBySlug(pr.RepoSlug)
 	if r == nil {
-		return m.setStatus(styleOrange.Render("PR repo " + pr.RepoSlug + " is not in view"))
+		return m.setStatus(styleOrange.Render(noLocalClone(pr.RepoSlug, "check out")))
 	}
 	if r.status.DirtyCount > 0 {
 		return m.setStatus(styleOrange.Render("checkout skipped: dirty working tree in " + baseName(r.repo.Path)))
@@ -1386,10 +1473,10 @@ func (m *Model) checkoutPR() tea.Cmd {
 }
 
 // keepCursorOn re-points the cursor at path within the current visible set, or
-// clamps to the top when it's gone. Unlike focusRepoByPath it preserves the
-// filter — for changes that reshuffle the filtered list, not escape it. Reloads
-// the panes only when the cursor lands on a different repo (a needless reload
-// collapses an open diff by resetting graphSel/graphOffset/changeShowDiff).
+// clamps to the top when it's gone. It preserves the filter — this is for
+// changes that reshuffle the filtered list, not escape it. Reloads the panes
+// only when the cursor lands on a different repo (a needless reload collapses an
+// open diff by resetting graphSel/graphOffset/changeShowDiff).
 
 // reclampCursor keeps the cursor on a real visible row after a status change and
 // reports whether the panels need reloading. A statusMsg can drop the highlighted
@@ -1425,28 +1512,132 @@ func (m *Model) keepCursorOn(path string) tea.Cmd {
 	return m.loadContextCmd()
 }
 
-// focusRepoByPath moves the repo cursor to the repo at path and focuses its
-// Branches pane, so a PR checkout lands you ready to review. It clears any
-// repo/branch filter and the attention view so the target is visible and the
-// cursor indexes m.repos directly. No-op if path isn't among the repos.
-func (m *Model) focusRepoByPath(path string) {
-	idx := -1
-	for i, r := range m.repos {
-		if r.repo.Path == path {
-			idx = i
-			break
+// repoProbeInterval is how often, while a script runs, manygit checks whether
+// any repo moved. The check is ~11 stat calls per repo and spawns no processes
+// (measured at ~0.5ms across 28 repos), so it can be frequent; the Status() reads
+// it triggers are the expensive part — 6-8 git subprocesses each — and only run
+// for repos that actually changed.
+const repoProbeInterval = 1200 * time.Millisecond
+
+// repoPaths is the paths of every discovered repo, snapshotted so the probe
+// goroutine never touches the model.
+func (m Model) repoPaths() []string {
+	paths := make([]string, 0, len(m.repos))
+	for _, r := range m.repos {
+		paths = append(paths, r.repo.Path)
+	}
+	return paths
+}
+
+// takeOutputPane hands the Output pane to a new producer, superseding whatever
+// was writing there — a streaming script, a pending AI reply, or both.
+//
+// There is one pane but two producers with their own generation counters: the
+// script runner stamps scriptOutMsg with outputRun, the AI harness stamps its
+// replies with aiRun. Bumping only your own leaves the other one's messages
+// still passing their staleness check, so a script that is superseded by an AI
+// request keeps appending its lines into the AI's pane, and an AI reply that
+// arrives after a script started wipes the script's output and clears
+// outputRunning. Bumping both is what makes the handover exclusive.
+//
+// It also drops the repo probe: the run that chain belonged to no longer owns
+// the pane, and its next tick would be discarded on the run guard anyway.
+// Producers that actually change repos re-arm with startRepoProbe.
+func (m *Model) takeOutputPane(title string) {
+	m.outputRun++
+	m.aiRun++
+	m.outputTitle = title
+	m.outputLines = nil
+	m.outputOffset = 0
+	m.outputRunning = true
+	m.probing = false
+}
+
+// startRepoProbe baselines every repo and arms the probe for the current
+// outputRun, returning nil if a chain is already live FOR THAT RUN. The baseline
+// is taken when the script STARTS, not on the first tick: whatever the script
+// changed in the meantime would otherwise be baked into the baseline and never
+// reported. It costs ~11 stat calls per repo (~0.5ms across 28) on a keystroke
+// that is already spawning a shell.
+//
+// The guard is tagged by run, and both halves matter:
+//
+//   - Same run, twice: refuse. Every tick re-arms itself, so a second chain for
+//     one run would never end and would double the stat rate forever. This is
+//     reachable because the AI-harness paths set outputRunning without bumping
+//     outputRun, so outputRunning alone wouldn't prevent it.
+//   - New run: arm, even though probing is still true. Starting a script while
+//     one is streaming is unguarded and runSelectedScript bumps outputRun to
+//     supersede the old one — which means the in-flight tick now carries a stale
+//     run and is dropped without re-arming. If the new run didn't arm here,
+//     nothing would be ticking and the second script would get no live updates
+//     at all.
+func (m *Model) startRepoProbe() tea.Cmd {
+	if m.probing && m.probeRun == m.outputRun {
+		return nil
+	}
+	for _, r := range m.repos {
+		r.fp = git.Fingerprint(r.repo.Path)
+	}
+	m.probing, m.probeRun = true, m.outputRun
+	return repoProbeCmd(m.outputRun, m.repoPaths())
+}
+
+// repoProbeCmd samples every repo's fingerprint after repoProbeInterval. The
+// sampling happens inside the command, off the render loop.
+func repoProbeCmd(run int, paths []string) tea.Cmd {
+	return tea.Tick(repoProbeInterval, func(time.Time) tea.Msg {
+		fps := make(map[string]int64, len(paths))
+		for _, p := range paths {
+			fps[p] = git.Fingerprint(p)
 		}
+		return repoProbeMsg{run: run, fps: fps}
+	})
+}
+
+// probeChanged adopts a fresh fingerprint sample and returns the paths that
+// moved since the last one. A repo with no baseline yet (fp == 0: added by a
+// rescan mid-script) adopts the sample silently — reporting it would fire a
+// Status() for every repo on the first tick, which is the sweep this avoids.
+func (m *Model) probeChanged(fps map[string]int64) []string {
+	var changed []string
+	for _, r := range m.repos {
+		fp, ok := fps[r.repo.Path]
+		if !ok || fp == r.fp {
+			continue
+		}
+		if r.fp != 0 {
+			changed = append(changed, r.repo.Path)
+		}
+		r.fp = fp
 	}
-	if idx < 0 {
-		return
+	return changed
+}
+
+// restatAllCmd re-reads every repo's local status. No network: this is the same
+// work Init does at launch (~170ms of concurrent git across 28 repos), not the
+// `r` refresh, so finishing a script can't spray fetches at every remote.
+func (m Model) restatAllCmd() tea.Cmd {
+	cmds := make([]tea.Cmd, 0, len(m.repos))
+	for _, r := range m.repos {
+		cmds = append(cmds, statusCmd(r.repo.Path))
 	}
-	m.filter = ""
-	m.filterPanel = panelRepos
-	m.filterAttention = false
-	m.cursor = idx
-	m.branchCursor = 0
-	m.focus = panelBranches
-	m.topView = tvBranches // show the checked-out repo's branches, not the PR list
+	return tea.Batch(cmds...)
+}
+
+// loadContextIfCurrent reloads the Branches/Graph/Changes panes only when path
+// is the repo those panes are actually showing. Something changing in a repo the
+// cursor isn't on leaves them correct, so reloading would spend 2-3 git
+// subprocesses redrawing identical content — and results are path-guarded in
+// Update anyway, so the work would be discarded on arrival.
+func (m Model) loadContextIfCurrent(path string) tea.Cmd {
+	if path == "" {
+		return nil
+	}
+	if r := m.currentVisible(m.visibleRepos()); r != nil && r.repo.Path == path {
+		return m.loadContextCmd()
+	}
+	return nil
 }
 
 // runSelectedScript starts the highlighted script in the background and flips the
@@ -1457,14 +1648,12 @@ func (m *Model) runSelectedScript() tea.Cmd {
 	if m.scriptCursor < 0 || m.scriptCursor >= len(vs) {
 		return nil
 	}
-	m.outputRun++ // supersede any still-streaming previous run
-	m.outputTitle = vs[m.scriptCursor].Name
-	m.outputLines = nil
-	m.outputOffset = 0
-	m.outputRunning = true
+	m.takeOutputPane(vs[m.scriptCursor].Name) // supersede any previous producer
 	m.focus = panelBottom
 	m.bottomView = bvOutput
-	return m.runScriptCmd()
+	// Arm the probe so the Repos pane follows what the script does as it goes,
+	// instead of waiting for the end.
+	return tea.Batch(m.runScriptCmd(), m.startRepoProbe())
 }
 
 // checkoutSelected checks out the highlighted branch when the Branches panel is

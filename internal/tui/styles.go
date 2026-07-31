@@ -16,6 +16,11 @@ var (
 	styleGroup   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("4"))
 	styleCursor  = lipgloss.NewStyle().Bold(true).Foreground(borderAccent)
 	styleTitle   = lipgloss.NewStyle().Bold(true).Foreground(borderAccent)
+	// styleStrong emphasizes a field by weight alone, keeping the terminal's own
+	// foreground. For something that has to stand out on a line already carrying
+	// coloured tokens — the repo name in a PR row sits beside a cyan base branch
+	// and a yellow head — where another hue would compete instead of rank.
+	styleStrong = lipgloss.NewStyle().Bold(true)
 )
 
 // Fixed column widths (display cells) reserve room for the widest glyph strings

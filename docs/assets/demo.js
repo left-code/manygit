@@ -189,29 +189,42 @@
     ["", " }"]
   ];
 
-  // `my PRs` — all authored by the signed-in user, which is what gh search
-  // --author=@me returns.
+  // `my PRs` — all authored by the signed-in user, which is what the
+  // `author:@me` PR search returns.
+  //
+  // base/head are gh.PullRequest.BaseRef/HeadRef. The binary gets them from a
+  // `gh api graphql` search: `gh search prs --json` has no baseRefName or
+  // headRefName field at any version, which is why that query moved to GraphQL.
+  //
+  // #204 is the fixture for the already-checked-out marker: its head is the
+  // branch web-dashboard is sitting on in REPOS, so the row renders green from
+  // the first frame.
   var PR_MINE = [
-    { num: 412, author: "rabeeh-ta", title: "Retry budget for upstream calls", repo: "api-gateway", draft: false },
-    { num: 77, author: "rabeeh-ta", title: "Streaming responses in the JS SDK", repo: "sdk-js", draft: true },
-    { num: 39, author: "rabeeh-ta", title: "Drop node 18 from the test matrix", repo: "ci-actions", draft: false }
+    { num: 412, author: "rabeeh-ta", title: "Retry budget for upstream calls", repo: "api-gateway", base: "main", head: "feat/retry-budget", draft: false },
+    { num: 204, author: "rabeeh-ta", title: "Usage chart: switch to the aggregated endpoint", repo: "web-dashboard", base: "main", head: "feat/usage-chart", draft: false },
+    { num: 77, author: "rabeeh-ta", title: "Streaming responses in the JS SDK", repo: "sdk-js", base: "release/2.4", head: "feat/streaming-responses", draft: true },
+    { num: 39, author: "rabeeh-ta", title: "Drop node 18 from the test matrix", repo: "ci-actions", base: "main", head: "chore/drop-node-18", draft: false }
   ];
 
   // `review requests`. Ordered so pressing enter down the list walks all three
   // real outcomes of checkoutPR(): a clean repo checks out, a dirty one is
   // skipped with a reason, and one whose repo isn't in the tree says so.
   var PR_REVIEW = [
-    { num: 55, author: "Sinu00", title: "Design tokens: a dark-mode pass", repo: "design-system", draft: false },
-    { num: 91, author: "zameel7", title: "Bump the cluster to Kubernetes 1.30", repo: "k8s-manifests", draft: false },
-    { num: 128, author: "nihxdr", title: "Split the OTLP exporter out of core", repo: "telemetry", draft: false },
-    { num: 143, author: "rafeehcp", title: "Drop the vendored logger", repo: "api-gateway", draft: true },
-    { num: 12, author: "Sinu00", title: "Cache the route table between reloads", repo: "docs-site", draft: false }
+    { num: 55, author: "Sinu00", title: "Design tokens: a dark-mode pass", repo: "design-system", base: "main", head: "feat/dark-mode-tokens", draft: false },
+    { num: 91, author: "zameel7", title: "Bump the cluster to Kubernetes 1.30", repo: "k8s-manifests", base: "staging", head: "chore/k8s-1.30", draft: false },
+    { num: 128, author: "nihxdr", title: "Split the OTLP exporter out of core", repo: "telemetry", base: "main", head: "refactor/otlp-exporter", draft: false },
+    { num: 143, author: "rafeehcp", title: "Drop the vendored logger", repo: "api-gateway", base: "main", head: "chore/drop-vendored-logger", draft: true },
+    { num: 12, author: "Sinu00", title: "Cache the route table between reloads", repo: "docs-site", base: "main", head: "feat/route-table-cache", draft: false }
   ];
 
+  // "Title: detail" — the shape news.go's prompt now asks the harness for, so
+  // the overlay can render a heading with its explanation beneath. An entry with
+  // no colon is all heading (the last one), which is what an older cached feed
+  // looks like and has to keep working.
   var NEWS = [
-    "api-gateway landed a token-bucket rate limiter; the retry budget is next",
-    "web-dashboard is mid-refactor on the usage chart — 7 files still dirty",
-    "sdk-js has diverged from origin/release/2.4: 1 ahead, 3 behind",
+    "api-gateway landed a token-bucket rate limiter: per-route budgets, a Retry-After header, and the retry budget is next",
+    "web-dashboard is mid-refactor on the usage chart: 7 files still dirty, the aggregated endpoint swap is half done",
+    "sdk-js has diverged from origin/release/2.4: 1 commit ahead and 3 behind, streaming responses still unmerged",
     "k8s-manifests fell 2 behind staging after the 1.30 bump"
   ];
 
@@ -297,6 +310,30 @@
   };
   var SCRIPT_FALLBACK = ["", "done."];
 
+  // What a scripted run actually does to the repos — the reason the Repos pane
+  // has to keep up while a script is still running.
+  //
+  // `git: true` means the change touches .git (a pull moves the branch and
+  // rewrites FETCH_HEAD), so git.Fingerprint sees it and the repo-probe tick
+  // re-stats that one repo mid-run: its row updates as the line scrolls past,
+  // while the other repos cost nothing. `git: false` never touches .git — npm
+  // rewriting a lockfile is a working-tree change — so the probe is blind to it
+  // by design (TestFingerprint_IgnoresWorkingTreeEdits) and it only surfaces in
+  // the full re-stat when the script ends. Both halves of that are real; the
+  // demo shows both rather than pretending one mechanism covers everything.
+  var SCRIPT_EFFECTS = {
+    "scripts/sync-all.sh": [
+      { after: "     1 file changed, 16 insertions(+), 8 deletions(-)", repo: "mobile-client", git: true,
+        apply: function (r) { r.behind = 0; } },
+      { after: "     1 file changed, 3 insertions(+), 3 deletions(-)", repo: "k8s-manifests", git: true,
+        apply: function (r) { r.behind = 0; } }
+    ],
+    "bootstrap.sh": [
+      { after: null, repo: "web-dashboard", git: false,
+        apply: function (r) { r.dirty += 1; } } // npm ci rewrote package-lock.json
+    ]
+  };
+
   /* ----------------------------------------------------------------- state */
 
   var S = {
@@ -358,6 +395,7 @@
     ghAvailable: false,
     ghUser: "",
     prLoaded: false,
+    prChosen: false, // the user picked a list with `m`; autoPickPRList defers to it
 
     // top-bar news. Empty until the harness summarises; newsLoading drives the
     // "summarizing commits..." note next to the repo count.
@@ -396,6 +434,8 @@
   var og = function (s) { return sp("og", s); };
   var rd = function (s) { return sp("rd", s); };
   var gp = function (s) { return sp("gp", s); };
+  var bo = function (s) { return sp("b", s); }; // styleStrong: weight, not hue
+  var ti = function (s) { return sp("ti", s); }; // styleTitle: accent + bold
   var cur = function (s) { return sp("cur", s); };
 
   // The @author in the PRs pane. These are real GitHub logins, so the handle
@@ -713,7 +753,8 @@
     setTimeout(function () {                                              // ghProbeCmd
       S.ghProbed = true; S.ghInstalled = true; S.ghAvailable = true; S.ghUser = "rabeeh-ta";
       render();
-      setTimeout(function () { S.prLoaded = true; render(); }, 260 );    // then both PR lists
+      // then both PR lists — prsMsg, which is also where the pane picks its list
+      setTimeout(function () { S.prLoaded = true; autoPickPRList(); render(); }, 260);
     }, 780);
     setTimeout(function () { S.newsLoading = true; render(); }, 900);     // harness summarising
     setTimeout(function () {                                              // newsFeedMsg
@@ -726,6 +767,7 @@
     repos.forEach(function (r) { r.loaded = true; r.fetching = false; });
     S.ghProbed = true; S.ghInstalled = true; S.ghAvailable = true; S.ghUser = "rabeeh-ta";
     S.prLoaded = true;
+    autoPickPRList();
     S.newsFeed = NEWS.slice();
     loadContext();
     render();
@@ -748,6 +790,63 @@
     return [d("No open PRs authored by you"), d("m: review requests")];
   }
 
+  // A PR occupies two lines — the title line, then the repo/branch detail line
+  // indented under it past the cursor gutter — plus a blank line separating it
+  // from the next. Without the gap, nine PRs are eighteen unbroken lines and the
+  // eye can't find where one ends and the next starts.
+  var PR_ROW_LINES = 2;
+  var PR_ROW_GAP = 1;
+  var PR_DETAIL_INDENT = "&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;";
+
+  // prRowsThatFit: n rows occupy n*PR_ROW_LINES plus the gaps BETWEEN them,
+  // (n-1)*PR_ROW_GAP — so a trailing blank never costs a row the pane could
+  // otherwise have shown. Always at least one.
+  function prRowsThatFit(h) {
+    return Math.max(1, Math.floor((h + PR_ROW_GAP) / (PR_ROW_LINES + PR_ROW_GAP)));
+  }
+
+  // prArrow points from the incoming branch to the one receiving it, so the row
+  // reads "base gets head". It follows the same status_glyphs setting as ↑/↓:
+  // ambiguous-width terminals can render ← two cells wide and drift the line,
+  // so `ascii` gets the plain two-character form.
+  function prArrow() { return S.glyphs === "unicode" ? "←" : "<-"; }
+
+  // prRepo is repoBySlug: the discovered repo a PR belongs to, or null. The Go
+  // matches on the origin slug cached at status-load time; the fixtures carry the
+  // short name, so the demo matches on that.
+  function prRepo(p) {
+    var hit = discovered().filter(function (r) { return r.n === p.repo; });
+    return hit.length ? hit[0] : null;
+  }
+
+  // prCheckedOut: this repo is sitting on the PR's head branch, i.e. this PR is
+  // what it currently has checked out. Guarded on a non-empty head so a PR with
+  // unknown refs can't match a repo whose branch hasn't been read yet.
+  function prCheckedOut(p) {
+    if (!p.head) return false;
+    var r = prRepo(p);
+    return !!r && r.loaded && currentBranch(r) === p.head;
+  }
+
+  // prBranchLine is the second line of a PR row: which repo the PR is in, which
+  // branch that repo is checked out to locally, and base ← head. The local
+  // branch is omitted when the PR's repo isn't in the tree — which doubles as
+  // the tell that enter and o will say it is not in this tree.
+  function prBranchLine(p) {
+    // The repo is the field you scan this line for — which of a dozen repos this
+    // PR is in — so it leads on weight, not dimmed like the detail around it.
+    var out = bo(p.repo);
+    var r = prRepo(p);
+    if (r && r.loaded && currentBranch(r)) {
+      var paren = "(" + currentBranch(r) + ")";
+      out += " " + (prCheckedOut(p) ? gr(paren) : d(paren));
+    }
+    if (p.base || p.head) {
+      out += d(": ") + cy(p.base || "") + d(" " + prArrow() + " ") + yl(p.head || "");
+    }
+    return out;
+  }
+
   function renderPRs(h) {
     if (!S.ghAvailable) {
       return centerBlock(d(prUnavailableHint()).replace(/\n/g, "<br>"));
@@ -763,14 +862,18 @@
       var e = prEmptyState();
       return "<div>" + header + "</div>" + centerBlock(e[0], e[1]);
     }
-    var w = win(prs.length, S.prCursor, Math.max(1, h - 2));
+    // The window counts ROWS and not lines — an off-by-one leaves a title whose
+    // branch line got clamped away.
+    var w = win(prs.length, S.prCursor, prRowsThatFit(h - 2));
     var out = "<div>" + header + "</div><div>&nbsp;</div>";
     for (var i = w[0]; i < w[1]; i++) {
       var p = prs[i];
       var on = S.focus === "branches" && i === S.prCursor;
+      if (i > w[0]) out += "<div>&nbsp;</div>"; // gap BETWEEN rows, not after the last
       out += "<div>" + (on ? " " + cur("> ") : "   ") +
         yl("#" + p.num) + "  " + ghUser(p.author) + "  " + esc(p.title) +
-        (p.draft ? d(" [draft]") : "") + d("  " + p.repo) + "</div>";
+        (p.draft ? d(" [draft]") : "") + "</div>";
+      out += "<div>" + PR_DETAIL_INDENT + prBranchLine(p) + "</div>";
     }
     return out;
   }
@@ -1228,6 +1331,54 @@
     var body = lines.slice(start, start + h).map(function (l) { return "<div>" + l + "</div>"; }).join("");
     return pane(d("Graph: " + (r ? r.n : "(no repo)") + "  (j/k scroll, esc close)"), true, body, "gfull");
   }
+  // splitHeadline cuts a headline into its changelog heading and the explanation
+  // after it, on the FIRST colon. No colon means all heading and no detail.
+  // A leading colon is not a title, so that line is kept whole.
+  function splitHeadline(h) {
+    var i = h.indexOf(":");
+    if (i <= 0) return [h.trim(), ""];
+    return [h.slice(0, i).trim(), h.slice(i + 1).trim()];
+  }
+
+  // wrapWords breaks on spaces only, never mid-word — the Go can't use lipgloss
+  // Width() here for the same reason (it hard-wraps mid-word). A single word
+  // longer than w gets its own over-long line rather than being cut.
+  function wrapWords(s, w) {
+    var fields = String(s).split(/\s+/).filter(Boolean);
+    if (!fields.length) return [];
+    if (w <= 0) return [fields.join(" ")];
+    var out = [], cur = fields[0];
+    for (var i = 1; i < fields.length; i++) {
+      if (cur.length + 1 + fields[i].length <= w) { cur += " " + fields[i]; continue; }
+      out.push(cur); cur = fields[i];
+    }
+    out.push(cur);
+    return out;
+  }
+
+  var NEWS_MEASURE = 76; // readable line length; the overlay is full-screen
+  function newsColW() { return NEWS_MEASURE; }
+
+  // newsLines renders the feed as a changelog: a numbered heading per entry, its
+  // explanation wrapped and indented beneath, and a blank line between entries.
+  // Ten headlines stacked with no gap read as one grey block. Returns flat lines
+  // so j/k can scroll by RENDERED line, since an entry is several.
+  function newsLines() {
+    var colW = newsColW(), indent = "&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;", out = [];
+    S.newsFeed.forEach(function (h, i) {
+      if (i > 0) out.push("&nbsp;"); // the gap goes BETWEEN entries
+      var parts = splitHeadline(h);
+      var num = d(String(i + 1).padStart(2) + " ").replace(/ /g, "&nbsp;");
+      wrapWords(parts[0], colW - 3).forEach(function (ln, j) {
+        out.push((j === 0 ? num : "&nbsp;&nbsp;&nbsp;") + ti(ln));
+      });
+      wrapWords(parts[1], colW - 5).forEach(function (ln) {
+        out.push(indent + d(ln));
+      });
+    });
+    return out;
+  }
+
   function newsOverlay(h) {
     var title = d("News — " + S.newsFeed.length + " headlines  (j/k scroll, esc close)");
     // Go: newsView has two empty-feed states, summarizing vs nothing to say. The
@@ -1238,9 +1389,12 @@
         : "(no main-branch activity in the last " + S.newsDays + " days, or no AI harness set)";
       return pane(title, true, "<div>" + d(empty) + "</div>", "nfull");
     }
-    var lines = S.newsFeed.map(function (n, i) { return "<div>" + d(String(i + 1).padStart(2) + " ") + esc(n) + "</div>"; });
+    var lines = newsLines();
     var start = clamp(S.newsOffset, 0, Math.max(0, lines.length - 1));
-    return pane(title, true, lines.slice(start, start + h).join(""), "nfull");
+    var body = lines.slice(start, start + h).map(function (l) { return "<div>" + l + "</div>"; }).join("");
+    // lipgloss.Place centres the block as one unit; a max-width column with auto
+    // margins is the browser's version of that.
+    return pane(title, true, '<div class="newscol">' + body + "</div>", "nfull");
   }
 
   /* ---------------------------------------------------------------- themes */
@@ -1267,6 +1421,23 @@
     S.focus = "branches";
     if (v !== "prs") clearPRFilter(); // leaving the PRs sub-view drops its `/` filter
     S.topView = v;
+    if (v === "prs") autoPickPRList();
+  }
+
+  // autoPickPRList points the PRs pane at whichever list has something in it:
+  // your own PRs normally, review requests when yours are empty and reviews are
+  // waiting. Opening onto an empty list while the other one has nine PRs in it
+  // wastes the keypress. With nothing in either it stays on your own, so the
+  // pane shows the more useful of the two empty messages.
+  //
+  // Runs both when the pane opens and when the lists land — they load async, so
+  // `4` is normally pressed while both are still empty (runInit reproduces that
+  // gap). Once the user has chosen with `m` it stops, so an explicit choice
+  // outlives the `r` refresh.
+  function autoPickPRList() {
+    if (S.prChosen) return;
+    var want = prMine().length === 0 && prReview().length > 0;
+    if (want !== S.prShowReview) { S.prShowReview = want; S.prCursor = 0; }
   }
 
   // setBottomView: same, plus the bottom slot's own side effects — a PR needle is
@@ -1336,6 +1507,39 @@
     if (cur && cur.path !== was) loadContext();
   }
 
+  // noLocalClone is the one message for "this PR's repo isn't among the repos
+  // manygit scanned". enter and o fail for exactly that reason, so they say
+  // exactly this, differing only in the verb. It names the tree rather than the
+  // pane, because that is what has to change to fix it.
+  function noLocalClone(slug, verb) {
+    return slug + " isn't in this tree — no local clone to " + verb;
+  }
+
+  // openTarget resolves what `o` should open. In the PRs pane that is the
+  // highlighted PR's local clone, not whatever the Repos cursor happens to be
+  // on: you act on what you are looking at. Returns {path} when there is
+  // something to open, {missing} when the PR has no local clone.
+  function openTarget() {
+    if (S.focus === "branches" && S.topView === "prs") {
+      var prs = visiblePRs();
+      if (S.prCursor < 0 || S.prCursor >= prs.length) return {};
+      var pr = prs[S.prCursor], r = prRepo(pr);
+      return r ? { path: r.path } : { missing: pr.repo };
+    }
+    var cr = curRepo();
+    return cr ? { path: cr.path } : {};
+  }
+
+  // loadContextIfCurrent (update.go): panes 3/5/6 show the repo under the REPO
+  // cursor, so they only go stale when the thing that changed is that repo.
+  // Reloading for any other repo would spend 2-3 git subprocesses in the binary
+  // redrawing content that is already correct.
+  function loadContextIfCurrent(path) {
+    if (!path) return;
+    var r = curRepo();
+    if (r && r.path === path) loadContext();
+  }
+
   function keepCursorOn(path) {
     S.cursor = 0;
     var vis = visibleRepos();
@@ -1359,24 +1563,42 @@
     } else S.outputOffset = clamp(S.outputOffset + n, 0, Math.max(0, S.outputLines.length - 1));
   }
 
-  function runScript() {
-    var vs = visibleScripts();
-    if (S.scriptCursor < 0 || S.scriptCursor >= vs.length) return;
+  // takeOutputPane hands the Output pane to a new producer, superseding whatever
+  // was writing there — a streaming script, a pending AI reply, or both.
+  //
+  // The Go has to bump TWO counters here: scriptOutMsg is stamped with outputRun
+  // and the AI replies with aiRun, so bumping only one leaves the other's
+  // messages still passing their staleness check and writing into a pane they no
+  // longer own. This port only ever had the one counter, so it always had the
+  // exclusive handover — it is a named function so the two stay greppable
+  // together, per the "ported functions keep their Go names" rule.
+  function takeOutputPane(title) {
     S.outputRun++;
-    var run = S.outputRun;
-    S.outputTitle = vs[S.scriptCursor].name;
+    S.outputTitle = title;
     S.outputLines = [];
     S.outputOffset = 0;
     S.outputRunning = true;
+  }
+
+  function runScript() {
+    var vs = visibleScripts();
+    if (S.scriptCursor < 0 || S.scriptCursor >= vs.length) return;
+    takeOutputPane(vs[S.scriptCursor].name);
+    var run = S.outputRun;
     S.focus = "bottom";
     S.bottomView = "output";
     var lines = ["$ " + S.outputTitle, ""].concat(SCRIPT_OUT[S.outputTitle] || SCRIPT_FALLBACK);
+    var effects = (SCRIPT_EFFECTS[S.outputTitle] || []).slice();
     var i = 0;
     var reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     (function step() {
       if (run !== S.outputRun) return; // superseded
       if (i >= lines.length) {
         S.outputRunning = false;
+        // Everything the probe couldn't see lands now. restatAll() is the Go's
+        // restatAllCmd: a local re-read of every repo, no fetch — so ending a
+        // script can't spray git fetches at every remote.
+        restatAll(effects);
         setStatus(gr("ran " + S.outputTitle));
         render();
         return;
@@ -1389,10 +1611,53 @@
         var atBottom = S.outputOffset >= S.outputLines.length - 1;
         S.outputLines.push(lines[i]);
         if (atBottom) S.outputOffset = S.outputLines.length - 1;
+        applyGitEffects(effects, lines[i]);
       }
       render();
       setTimeout(step, reduce ? 0 : 55);
     })();
+  }
+
+  // applyGitEffects is the repo-probe tick: the .git-level changes announced by
+  // the line that just printed are applied now, so their rows update while the
+  // script is still running instead of waiting for it to finish. Effects are
+  // spliced out as they fire, so restatAll() at the end only has the rest left.
+  //
+  // reclampCursor is not optional here. In the Go every one of these refreshes
+  // arrives as a statusMsg, and that handler re-clamps on each one because a new
+  // status changes which repos are VISIBLE while the cursor is an index into
+  // that list. Under `F`, sync-all.sh clearing `behind` on two repos drops them
+  // both from the filtered list — without the re-clamp the cursor is left past
+  // the end, curRepo() goes null, and the pane draws no cursor at all.
+  function applyGitEffects(effects, line) {
+    for (var i = effects.length - 1; i >= 0; i--) {
+      var e = effects[i];
+      if (!e.git || e.after !== line) continue;
+      var r = discovered().filter(function (x) { return x.n === e.repo; })[0];
+      if (r) {
+        var was = curRepo() ? curRepo().path : "";
+        e.apply(r);
+        reclampCursor(was);
+        loadContextIfCurrent(r.path);
+      }
+      effects.splice(i, 1);
+    }
+  }
+
+  // restatAll re-reads every repo, applying whatever the probe couldn't see. The
+  // binary spends ~170ms of concurrent local git here across ~28 repos — the
+  // same work Init() does at launch, once, at the moment a script ends. Every
+  // one of those reads is a statusMsg, so it re-clamps for the same reason
+  // applyGitEffects does.
+  function restatAll(effects) {
+    var was = curRepo() ? curRepo().path : "";
+    effects.forEach(function (e) {
+      var r = discovered().filter(function (x) { return x.n === e.repo; })[0];
+      if (r) e.apply(r);
+    });
+    effects.length = 0;
+    reclampCursor(was);
+    loadContext(); // the Go batches loadContextCmd here too
   }
 
   function checkoutSelected() {
@@ -1414,18 +1679,20 @@
     var prs = visiblePRs();
     if (S.prCursor < 0 || S.prCursor >= prs.length) return;
     var pr = prs[S.prCursor];
-    var target = discovered().filter(function (r) { return r.n === pr.repo; })[0];
-    if (!target) { setStatus(og("PR repo " + pr.repo + " is not in view")); return; }
+    var target = prRepo(pr);
+    if (!target) { setStatus(og(noLocalClone(pr.repo, "check out"))); return; }
     if (stDirty(target) > 0) { setStatus(og("checkout skipped: dirty working tree in " + target.n)); return; }
-    // focusRepoByPath: land on that repo's Branches, ready to review. Note
-    // topView flips back to Branches — the fix from TestTUI_PRCheckoutLandsOnBranches.
-    target.b = "pr-" + pr.num;
-    S.filter = ""; S.filterPanel = "repos"; S.filterAttention = false;
-    S.cursor = discovered().indexOf(target);
-    S.branchCursor = 0;
-    S.focus = "branches";
-    S.topView = "branches";
-    loadContext(); // branchesFor() puts pr-N at the top, marked current
+    // `gh pr checkout` lands on the PR's HEAD branch, so the row's (branch) now
+    // matches pr.head and prCheckedOut() turns it green.
+    var was = curRepo() ? curRepo().path : "";
+    target.b = pr.head;
+    // Deliberately nothing moves — no focus change, no cursor jump, no filter
+    // reset. A PR spans several repos and you check out two or three in a row,
+    // so landing on one repo's Branches pane after each enter would break the
+    // walk. The row updates in place instead (Go: statusCmd + reclampCursor;
+    // here the fixture mutation IS the status, so reclamp directly).
+    reclampCursor(was);
+    loadContextIfCurrent(target.path);
     setStatus(gr("checked out PR #" + pr.num + " in " + target.n));
   }
 
@@ -1619,11 +1886,10 @@
   }
 
   function askCannedHarness(req) {
-    S.outputRun++;
-    S.outputTitle = S.harness + ": " + req;
+    // No repo probe here: asking the harness a question runs nothing against the
+    // repos, so there is nothing for the Repos pane to follow.
+    takeOutputPane(S.harness + ": " + req);
     S.outputLines = [d("asking " + S.harness + "... (scripted in this demo)")];
-    S.outputOffset = 0;
-    S.outputRunning = true;
     setBottomView("output");
     var run = S.outputRun;
     setTimeout(function () {
@@ -1668,10 +1934,7 @@
       setStatus(d("plan cancelled"));
       return;
     }
-    S.outputRun++;
-    S.outputTitle = "running " + plan.steps.length + " command" + (plan.steps.length === 1 ? "" : "s");
-    S.outputLines = [];
-    S.outputRunning = true;
+    takeOutputPane("running " + plan.steps.length + " command" + (plan.steps.length === 1 ? "" : "s"));
     setBottomView("output");
     // Step through them on a timer so it reads like work happening, and stop at
     // the first failure exactly as aigit.Execute does.
@@ -1680,14 +1943,40 @@
       if (run !== S.outputRun) return;
       if (i >= plan.steps.length) {
         S.outputRunning = false;
+        // aiDoneMsg re-reads every repo — "whatever ran changed the repos, so
+        // re-read them rather than leaving the list showing pre-command branches
+        // and counts". This is the same refetchAll the `r` key runs.
+        refetchAll();
         setStatus(gr(plan.steps.length + " command" + (plan.steps.length === 1 ? "" : "s") + " ok"));
         render(); return;
       }
       var st = plan.steps[i++];
       S.outputLines.push("  " + gp(st.repo) + "  git " + esc(st.args.join(" ")) + "  " + gr("ok"));
+      applyStepToRepo(st); // the repo probe: these are git commands, so pane 1 follows them live
       render();
       setTimeout(step, 260);
     })();
+  }
+
+  // applyStepToRepo is this port's repo probe. In the binary an AI plan runs real
+  // git, so .git changes, git.Fingerprint notices, and that repo's row is
+  // re-stat'd while the plan is still running. Here the commands are simulated,
+  // so the fixture is moved by hand to whatever the command would really have
+  // done — only for the verbs cannedPlan actually emits. reclampCursor for the
+  // same reason applyGitEffects needs it: changing a repo's counts can drop it
+  // out of the `F` filter, and the cursor is an index into that list.
+  function applyStepToRepo(st) {
+    var r = discovered().filter(function (x) { return x.n === st.repo; })[0];
+    if (!r) return;
+    var was = curRepo() ? curRepo().path : "";
+    var verb = st.args[0];
+    if (verb === "pull" || verb === "merge" || verb === "rebase") r.behind = 0;
+    else if (verb === "tag") {
+      var name = st.args.filter(function (a) { return /^v\d/.test(a); })[0];
+      if (name) r.tag = name;
+    } else return; // fetch --quiet moves nothing the row shows
+    reclampCursor(was);
+    loadContextIfCurrent(r.path);
   }
 
   function handleFilterKey(k) {
@@ -1781,7 +2070,9 @@
     }
     if (S.showNews) {
       if (k === "n" || k === "Escape") S.showNews = false;
-      else if (k === "j" || k === "ArrowDown") S.newsOffset = Math.min(S.newsOffset + 1, S.newsFeed.length - 1);
+      // By RENDERED line, not by headline: an entry is a heading plus a wrapped
+      // explanation plus a gap, so clamping to newsFeed.length stops j short.
+      else if (k === "j" || k === "ArrowDown") S.newsOffset = Math.min(S.newsOffset + 1, newsLines().length - 1);
       else if (k === "k" || k === "ArrowUp") S.newsOffset = Math.max(0, S.newsOffset - 1);
       else if (k === "q") setStatus(d(QUIT_HINT));
       return;
@@ -1874,7 +2165,8 @@
         break;
       case "b": checkoutSelected(); break;
       case "m":
-        if (S.focus === "branches" && S.topView === "prs") { S.prShowReview = !S.prShowReview; S.prCursor = 0; }
+        // prChosen: an explicit pick, so autoPickPRList stops overriding it.
+        if (S.focus === "branches" && S.topView === "prs") { S.prShowReview = !S.prShowReview; S.prChosen = true; S.prCursor = 0; }
         break;
       case "Escape": {
         // esc backs out of exactly ONE layer per press, innermost first, so it
@@ -1905,8 +2197,12 @@
         break;
       }
       case "o": {
-        var ro = curRepo();
-        if (ro) setStatus(d("o runs `" + S.openCmd + " " + ro.path + "` — nothing to open from a browser"));
+        // Divergence #2: the Go spawns an editor, a browser can't — so this says
+        // what it WOULD run. The target is resolved exactly as the Go resolves
+        // it, so the repo it names is the right one.
+        var t = openTarget();
+        if (t.missing) setStatus(og(noLocalClone(t.missing, "open")));
+        else if (t.path) setStatus(d("o runs `" + S.openCmd + " " + t.path + "` — nothing to open from a browser"));
         break;
       }
       case "F": S.filterAttention = !S.filterAttention; S.cursor = 0; loadContext(); break;

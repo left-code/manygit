@@ -2,10 +2,9 @@
 // gh for pull-request info and checkout, reusing gh's own auth — it holds no
 // GitHub token of its own (mirroring the harness package's use of the AI CLIs).
 //
-// Everything degrades gracefully: if gh is missing, logged out, or too old to
-// have `gh search prs` (added in gh 2.12), the calls return an error and the TUI
-// simply omits the GitHub features. `@me` is a server-side search qualifier, so
-// it does not depend on the gh version.
+// Everything degrades gracefully: if gh is missing or logged out, the calls
+// return an error and the TUI simply omits the GitHub features. `@me` is a
+// server-side search qualifier, so it does not depend on the gh version.
 package gh
 
 import (
@@ -14,27 +13,34 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"strconv"
 	"strings"
 )
 
-// PullRequest is one open pull request as returned by `gh search prs`.
+// PullRequest is one open pull request as returned by the PR search.
 type PullRequest struct {
 	Number   int    // PR number within its repo
 	Title    string // PR title
-	Author   string // author login (author.login)
+	Author   string // author login (author.login); "" if the account was deleted
 	RepoSlug string // "owner/repo" (repository.nameWithOwner)
 	URL      string // html URL
 	IsDraft  bool   // draft PRs are shown dimmed
+	BaseRef  string // branch the PR merges INTO (baseRefName)
+	HeadRef  string // branch being merged (headRefName)
 }
 
-// searchPR is the raw JSON shape of one `gh search prs --json …` element. Only
-// the fields we ask for are populated; the rest stay zero.
+// searchPR is the raw JSON shape of one search result node. Author is a pointer
+// because GitHub returns author: null for a deleted account, and a non-PR node
+// (a `type: ISSUE` search can return issues) decodes to the zero value — both
+// have to survive decoding rather than panic or become a blank row.
 type searchPR struct {
 	Number int    `json:"number"`
 	Title  string `json:"title"`
 	URL    string `json:"url"`
 	Draft  bool   `json:"isDraft"`
-	Author struct {
+	Base   string `json:"baseRefName"`
+	Head   string `json:"headRefName"`
+	Author *struct {
 		Login string `json:"login"`
 	} `json:"author"`
 	Repository struct {
@@ -42,9 +48,45 @@ type searchPR struct {
 	} `json:"repository"`
 }
 
-// prJSONFields is the exact --json field set the queries request; it matches the
-// searchPR struct so decoding never silently drops data.
-const prJSONFields = "number,title,author,repository,isDraft,url"
+// searchResult is the `gh api graphql` envelope. A GraphQL request can answer
+// 200 with a populated errors array and null data, so errors must be inspected —
+// decoding only `data` would turn a broken query into a silent "no PRs".
+type searchResult struct {
+	Data struct {
+		Search struct {
+			Nodes []searchPR `json:"nodes"`
+		} `json:"search"`
+	} `json:"data"`
+	Errors []struct {
+		Message string `json:"message"`
+	} `json:"errors"`
+}
+
+// prSearchQuery asks for the same open PRs `gh search prs` used to return, plus
+// the two branch names — which the REST-backed `gh search prs --json` cannot
+// provide at any version (its field set has no baseRefName/headRefName). Going
+// through GraphQL keeps it to ONE request per list; the alternative, a
+// `gh pr view` per result, would be up to 50.
+const prSearchQuery = `query($q: String!, $n: Int!) {
+  search(query: $q, type: ISSUE, first: $n) {
+    nodes {
+      ... on PullRequest {
+        number
+        title
+        url
+        isDraft
+        baseRefName
+        headRefName
+        author { login }
+        repository { nameWithOwner }
+      }
+    }
+  }
+}`
+
+// prSearchLimit is how many PRs each list fetches, matching the old
+// `gh search prs --limit=50`.
+const prSearchLimit = 50
 
 // run executes gh in dir (or the process cwd when dir=="") and returns trimmed
 // stdout, wrapping a non-zero exit with its stderr.
@@ -85,46 +127,62 @@ func Login(ctx context.Context) (string, bool) {
 
 // MyOpenPRs returns the current user's open PRs (any review state).
 func MyOpenPRs(ctx context.Context) ([]PullRequest, error) {
-	return searchPRs(ctx, "--author=@me")
+	return searchPRs(ctx, "is:pr is:open author:@me")
 }
 
 // ReviewRequestedPRs returns open PRs whose review has been requested from the
 // current user.
 func ReviewRequestedPRs(ctx context.Context) ([]PullRequest, error) {
-	return searchPRs(ctx, "--review-requested=@me")
+	return searchPRs(ctx, "is:pr is:open review-requested:@me")
 }
 
-// searchPRs runs `gh search prs` with the given filter plus the shared
-// open-state + JSON-field flags, and decodes the result.
-func searchPRs(ctx context.Context, filter string) ([]PullRequest, error) {
-	out, err := run(ctx, "", "search", "prs", filter,
-		"--state=open", "--limit=50", "--json", prJSONFields)
+// searchPRs runs the PR search as one GraphQL request and decodes the result.
+// `@me` is a server-side search qualifier, so this does not depend on knowing
+// the login locally.
+func searchPRs(ctx context.Context, query string) ([]PullRequest, error) {
+	out, err := run(ctx, "", "api", "graphql",
+		"-f", "query="+prSearchQuery,
+		"-f", "q="+query,
+		"-F", "n="+strconv.Itoa(prSearchLimit))
 	if err != nil {
 		return nil, err
 	}
 	return parsePRs([]byte(out))
 }
 
-// parsePRs decodes the JSON array from `gh search prs --json …` into
-// PullRequests. Pure (no exec), so it is unit-testable without a live gh.
+// parsePRs decodes the `gh api graphql` envelope into PullRequests. Pure (no
+// exec), so it is unit-testable without a live gh.
 func parsePRs(data []byte) ([]PullRequest, error) {
 	data = bytes.TrimSpace(data)
 	if len(data) == 0 {
 		return nil, nil
 	}
-	var raw []searchPR
-	if err := json.Unmarshal(data, &raw); err != nil {
+	var res searchResult
+	if err := json.Unmarshal(data, &res); err != nil {
 		return nil, fmt.Errorf("gh: parse prs: %w", err)
 	}
-	prs := make([]PullRequest, 0, len(raw))
-	for _, r := range raw {
+	if len(res.Errors) > 0 {
+		return nil, fmt.Errorf("gh: search prs: %s", res.Errors[0].Message)
+	}
+	nodes := res.Data.Search.Nodes
+	prs := make([]PullRequest, 0, len(nodes))
+	for _, r := range nodes {
+		if r.Number == 0 {
+			continue // not a PullRequest — the inline fragment left it empty
+		}
+		login := ""
+		if r.Author != nil {
+			login = r.Author.Login
+		}
 		prs = append(prs, PullRequest{
 			Number:   r.Number,
 			Title:    r.Title,
-			Author:   r.Author.Login,
+			Author:   login,
 			RepoSlug: r.Repository.NameWithOwner,
 			URL:      r.URL,
 			IsDraft:  r.Draft,
+			BaseRef:  r.Base,
+			HeadRef:  r.Head,
 		})
 	}
 	return prs, nil

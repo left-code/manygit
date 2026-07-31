@@ -812,6 +812,14 @@ a.chip:hover {
   color: var(--group);
   font-weight: 700;
 }
+/* styleStrong: emphasis by weight alone, keeping the terminal's own foreground.
+   For a field that has to stand out on a line already carrying coloured tokens —
+   the repo name in a PR row sits beside a cyan base and a yellow head — where
+   another hue would compete instead of rank. Inheriting the colour is also what
+   makes it work unchanged in both light and dark mode. */
+.b {
+  font-weight: 700;
+}
 .gr {
   color: var(--c-green);
 }
@@ -848,6 +856,19 @@ a.chip:hover {
 .cur {
   color: var(--accent);
   font-weight: 700;
+}
+/* styleTitle — accent + bold. Same values as .cur, kept separate because they
+   mean different things: .cur is the row cursor, .ti is a heading (the news
+   overlay's entry titles). */
+.ti {
+  color: var(--accent);
+  font-weight: 700;
+}
+/* lipgloss.Place centres the news block as one unit; a max-width column with
+   auto margins is the browser's version. The ch measure matches newsMeasure. */
+.newscol {
+  max-width: 76ch;
+  margin: 0 auto;
 }
 .rev {
   background: var(--ink);

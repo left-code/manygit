@@ -14,13 +14,21 @@ import (
 	"manygit/internal/harness"
 )
 
-// TestMain points XDG_CONFIG_HOME at a throwaway dir for the whole package so no
-// test that exercises the settings screen can ever write the developer's real
-// ~/.config/manygit/config.yml.
+// TestMain points XDG_CONFIG_HOME and XDG_CACHE_HOME at throwaway dirs for the
+// whole package, so no test can write the developer's real
+// ~/.config/manygit/config.yml or ~/.cache/manygit/news.json.
+//
+// The cache half is not hypothetical: any test that feeds a newsFeedMsg through
+// Update reaches saveNewsCache, and the handful of news tests that set
+// XDG_CACHE_HOME themselves did not cover the others — so `go test ./...` really
+// did overwrite the developer's own news feed with "alpha news"/"bravo news".
+// Setting it here covers every test in the package, including future ones that
+// would never think to.
 func TestMain(m *testing.M) {
 	dir, err := os.MkdirTemp("", "manygit-test-xdg")
 	if err == nil {
 		os.Setenv("XDG_CONFIG_HOME", dir)
+		os.Setenv("XDG_CACHE_HOME", filepath.Join(dir, "cache"))
 	}
 	code := m.Run()
 	if err == nil {

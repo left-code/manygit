@@ -5,11 +5,111 @@ package git
 import (
 	"bytes"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 )
+
+// fingerprintPaths are the paths inside .git whose mtime moves when git changes
+// the repo, relative to the .git directory ("" is .git itself). Between them
+// they cover every operation a script can perform: HEAD and .git for checkout,
+// index for commit and merge, FETCH_HEAD for fetch (rewritten each time, so its
+// own mtime moves even on the second fetch), ORIG_HEAD for merge and reset,
+// packed-refs and refs/* for branch and tag creation, and logs/HEAD as the
+// reflog backstop.
+var fingerprintPaths = []string{
+	"", "index", "HEAD", "FETCH_HEAD", "ORIG_HEAD", "packed-refs",
+	"refs", "refs/heads", "refs/tags", "refs/remotes", "logs/HEAD",
+}
+
+// gitDirOf resolves dir's git directory. Usually that is dir/.git, but in a
+// linked worktree (and a submodule) .git is a FILE holding "gitdir: <path>",
+// which has to be followed or every probe below it stats nothing. Returns "" if
+// dir isn't a repo at all.
+func gitDirOf(dir string) string {
+	p := filepath.Join(dir, ".git")
+	fi, err := os.Stat(p)
+	if err != nil {
+		return ""
+	}
+	if fi.IsDir() {
+		return p
+	}
+	b, err := os.ReadFile(p)
+	if err != nil {
+		return ""
+	}
+	target := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(string(b)), "gitdir:"))
+	if target == "" {
+		return ""
+	}
+	if !filepath.IsAbs(target) {
+		target = filepath.Join(dir, target)
+	}
+	return target
+}
+
+// Fingerprint is a cheap probe for "has anything git-level changed in this
+// repo?" — a hash over the mtime and size of a fixed handful of paths inside the
+// git directory, or 0 when dir isn't a repo (or has vanished). Comparing it
+// against the previous value tells the TUI which repos are worth a real Status()
+// read while a script is running: a Status() is 6-8 git subprocesses, this is
+// ~11 stat calls and no subprocess at all, which is what makes polling every
+// repo affordable.
+//
+// It hashes every probed path rather than taking the newest mtime. Max-of-mtimes
+// looks equivalent and is not: it only moves when the changed path's timestamp
+// beats the current maximum, and .git's own mtime is already bumped to "now" by
+// lock-file churn during most operations. A `git tag`, which writes only
+// refs/tags/, then lands a few hundred microseconds later and can leave the
+// maximum untouched — measured at roughly 3 misses in 10 runs. Hashing removes
+// the ordering assumption entirely: any probed path changing changes the result.
+// Size is folded in as well, so an append-only file like logs/HEAD is caught
+// even if two writes share a timestamp.
+//
+// It is a hint, not a guarantee. It is deliberately blind to working-tree edits
+// that never touch the git directory (see TestFingerprint_IgnoresWorkingTreeEdits)
+// — catching those would mean walking every file in every repo on every poll, so
+// the TUI covers them with a single full re-stat when the script ends instead.
+func Fingerprint(dir string) int64 {
+	gitDir := gitDirOf(dir)
+	if gitDir == "" {
+		return 0
+	}
+	const (
+		fnvOffset = 14695981039346656037
+		fnvPrime  = 1099511628211
+	)
+	h := uint64(fnvOffset)
+	mix := func(v uint64) {
+		for i := 0; i < 8; i++ {
+			h = (h ^ (v & 0xff)) * fnvPrime
+			v >>= 8
+		}
+	}
+	seen := false
+	for i, p := range fingerprintPaths {
+		fi, err := os.Stat(filepath.Join(gitDir, p))
+		if err != nil {
+			continue // absent paths are normal: no tags, never fetched, no reflog
+		}
+		seen = true
+		mix(uint64(i)) // index too, so a value moving between paths still counts
+		mix(uint64(fi.ModTime().UnixNano()))
+		mix(uint64(fi.Size()))
+	}
+	if !seen {
+		return 0
+	}
+	v := int64(h >> 1) // non-negative; 0 is reserved for "not a repo"
+	if v == 0 {
+		v = 1
+	}
+	return v
+}
 
 // RepoStatus is the computed state of a single repo.
 type RepoStatus struct {

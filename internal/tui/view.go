@@ -10,6 +10,7 @@ import (
 
 	"manygit/internal/aigit"
 	"manygit/internal/config"
+	"manygit/internal/gh"
 	"manygit/internal/git"
 	"manygit/internal/harness"
 )
@@ -511,7 +512,7 @@ func (m Model) prEmptyState() (msg, hint string) {
 	case !m.prLoaded:
 		return "Loading PRs...", ""
 	case m.prErr != nil:
-		return "Couldn't load PRs", "is gh up to date? needs 2.12+"
+		return "Couldn't load PRs", "check: gh auth status"
 	case m.prShowReview:
 		return "You're all caught up", "no PRs awaiting your review  ·  m: my PRs"
 	default:
@@ -562,7 +563,7 @@ func (m Model) renderPRsView(contentW, innerH int) string {
 
 	listH := max(1, innerH-2) // header + a blank spacer line
 	focused := m.focus == panelBranches
-	start, end := window(len(prs), m.prCursor, listH)
+	start, end := window(len(prs), m.prCursor, prRowsThatFit(listH))
 	var b strings.Builder
 	b.WriteString(header + "\n\n")
 	for i := start; i < end; i++ {
@@ -571,20 +572,103 @@ func (m Model) renderPRsView(contentW, innerH int) string {
 		if focused && i == m.prCursor {
 			cur = " " + styleCursor.Render("> ")
 		}
-		repo := pr.RepoSlug
-		if s := strings.LastIndex(repo, "/"); s >= 0 {
-			repo = repo[s+1:] // just the repo name; owner is usually the same org
-		}
 		draft := ""
 		if pr.IsDraft {
 			draft = styleDim.Render(" [draft]")
 		}
-		row := cur + styleYellow.Render("#"+strconv.Itoa(pr.Number)) + "  " +
-			styleGroup.Render("@"+pr.Author) + "  " + pr.Title + draft +
-			styleDim.Render("  "+repo)
-		b.WriteString(row + "\n")
+		if i > start {
+			b.WriteString("\n") // the gap goes BETWEEN rows, not after the last
+		}
+		b.WriteString(cur + styleYellow.Render("#"+strconv.Itoa(pr.Number)) + "  " +
+			styleGroup.Render("@"+pr.Author) + "  " + pr.Title + draft + "\n")
+		b.WriteString(prDetailIndent + m.prBranchLine(pr) + "\n")
 	}
 	return lipgloss.NewStyle().MaxWidth(contentW).Render(b.String())
+}
+
+// A PR occupies two lines — the title line, then the repo/branch detail line
+// indented under it past the cursor gutter — plus a blank line separating it
+// from the next. Without the gap, nine PRs are eighteen unbroken lines and the
+// eye can't find where one ends and the next starts.
+const (
+	prRowLines     = 2
+	prRowGap       = 1
+	prDetailIndent = "     "
+)
+
+// prRowsThatFit is how many PRs fit in h lines. n rows occupy n*prRowLines plus
+// the gaps BETWEEN them — (n-1)*prRowGap — so a trailing blank never costs a row
+// the pane could otherwise have shown. Always at least one, so a very short pane
+// shows a clipped PR rather than nothing.
+func prRowsThatFit(h int) int {
+	return max(1, (h+prRowGap)/(prRowLines+prRowGap))
+}
+
+// prArrow points from the incoming branch to the one receiving it, so the row
+// reads "base gets head". It follows the same status_glyphs setting as ↑/↓: an
+// ambiguous-width terminal can render ← two cells wide and drift the line, so
+// `ascii` gets the plain two-character form.
+func (m Model) prArrow() string {
+	if m.cfg.UnicodeGlyphs() {
+		return "←"
+	}
+	return "<-"
+}
+
+// shortRepo is the repo half of an "owner/repo" slug — the owner is nearly
+// always the same org across the list, so showing it would cost width and say
+// nothing.
+func shortRepo(slug string) string {
+	if s := strings.LastIndex(slug, "/"); s >= 0 {
+		return slug[s+1:]
+	}
+	return slug
+}
+
+// prCheckedOut reports whether the PR's local clone is sitting on the PR's head
+// branch — i.e. this PR is the thing that repo currently has checked out. Guards
+// on a non-empty HeadRef so a PR whose refs are unknown can't "match" a repo
+// whose branch hasn't been read yet.
+func (m Model) prCheckedOut(pr gh.PullRequest) bool {
+	if pr.HeadRef == "" {
+		return false
+	}
+	r := m.repoBySlug(pr.RepoSlug)
+	return r != nil && r.loaded && currentBranch(r.status) == pr.HeadRef
+}
+
+// prBranchLine is the second line of a PR row: which repo the PR is in, which
+// branch that repo is checked out to locally, and base ← head.
+//
+// The local branch comes from the slug cached on the repo's status at
+// status-load time, so this costs a slice scan and no git exec on render. It is
+// omitted entirely when the PR's repo isn't among the discovered repos — which
+// doubles as the visual tell that enter and o will say it is not in this tree. When it
+// matches the PR's head branch the PR is already checked out here, and it goes
+// green so a run of checkouts is legible at a glance.
+//
+// Base/head can be empty (a PR list cached before this existed, or a search that
+// returned partial nodes); the branch clause is then dropped rather than
+// rendering a dangling ": ←".
+func (m Model) prBranchLine(pr gh.PullRequest) string {
+	var b strings.Builder
+	// The repo is the field you scan this line for — which of a dozen repos this
+	// PR is in — so it leads on weight, not dimmed like the detail around it.
+	b.WriteString(styleStrong.Render(shortRepo(pr.RepoSlug)))
+	if r := m.repoBySlug(pr.RepoSlug); r != nil && r.loaded {
+		if cur := currentBranch(r.status); cur != "" {
+			style := styleDim
+			if m.prCheckedOut(pr) {
+				style = styleGreen // this PR is the branch that repo is on
+			}
+			b.WriteString(" " + style.Render("("+cur+")"))
+		}
+	}
+	if pr.BaseRef != "" || pr.HeadRef != "" {
+		b.WriteString(styleDim.Render(": ") + styleCyan.Render(pr.BaseRef) +
+			styleDim.Render(" "+m.prArrow()+" ") + styleYellow.Render(pr.HeadRef))
+	}
+	return b.String()
 }
 
 // window returns lines[start:end] so that keepVisible sits inside a height-h
@@ -1206,6 +1290,81 @@ func (m Model) graphView() string {
 
 // newsView renders the full-screen news feed — every headline at once (the top
 // bar only rotates through one at a time), with j/k scrolling.
+// newsMeasure caps the news column at a readable line length. The overlay is
+// full-screen, and a headline run edge-to-edge across a 200-column terminal is
+// unreadable — the eye loses the line on the way back.
+const newsMeasure = 76
+
+// newsColW is the width the news column wraps to: the terminal, indented, but
+// never wider than the measure. Shared by the renderer and the j/k clamp so both
+// agree on how many lines there are.
+func (m Model) newsColW() int {
+	w := m.width - 10
+	if w > newsMeasure {
+		w = newsMeasure
+	}
+	if w < 20 {
+		w = 20
+	}
+	return w
+}
+
+// wrapWords breaks s onto lines of at most w display cells, splitting on spaces
+// only. lipgloss's own Width(n) hard-wraps mid-word (see the keysBody gotcha in
+// CLAUDE.md), which turns a headline into gibberish. A single word longer than w
+// gets its own over-long line rather than being cut.
+func wrapWords(s string, w int) []string {
+	fields := strings.Fields(s)
+	if len(fields) == 0 {
+		return nil
+	}
+	if w <= 0 {
+		return []string{strings.Join(fields, " ")}
+	}
+	var out []string
+	cur := fields[0]
+	for _, f := range fields[1:] {
+		if lipgloss.Width(cur)+1+lipgloss.Width(f) <= w {
+			cur += " " + f
+			continue
+		}
+		out = append(out, cur)
+		cur = f
+	}
+	return append(out, cur)
+}
+
+// newsLines renders the feed as a changelog: a numbered heading per entry, its
+// explanation wrapped and indented beneath, and a blank line between entries.
+// Ten headlines stacked with no gap read as one grey block — which is the whole
+// reason this isn't just a list of lines any more.
+//
+// Returns the flat rendered lines so the caller can window them; j/k scroll by
+// these, not by headline, since an entry is several lines.
+func (m Model) newsLines() []string {
+	colW := m.newsColW()
+	const indent = "     " // detail sits under the heading text, past the number
+	var out []string
+	for i, h := range m.newsFeed {
+		if i > 0 {
+			out = append(out, "") // the gap goes BETWEEN entries
+		}
+		head, detail := splitHeadline(h)
+		num := styleDim.Render(fmt.Sprintf("%2d ", i+1))
+		for j, ln := range wrapWords(head, colW-3) {
+			if j == 0 {
+				out = append(out, num+styleTitle.Render(ln))
+				continue
+			}
+			out = append(out, "   "+styleTitle.Render(ln))
+		}
+		for _, ln := range wrapWords(detail, colW-len(indent)) {
+			out = append(out, indent+styleDim.Render(ln))
+		}
+	}
+	return out
+}
+
 func (m Model) newsView() string {
 	tw, th := m.width, m.height
 	if tw <= 0 {
@@ -1225,22 +1384,32 @@ func (m Model) newsView() string {
 	case len(m.newsFeed) == 0:
 		content = styleDim.Render(fmt.Sprintf("(no main-branch activity in the last %d days, or no AI harness set)", m.cfg.NewsDays))
 	default:
-		lines := make([]string, len(m.newsFeed))
-		for i, h := range m.newsFeed {
-			lines[i] = styleDim.Render(fmt.Sprintf("%2d ", i+1)) + h
-		}
-		start := m.newsOffset
-		if start > len(lines)-1 {
-			start = len(lines) - 1
-		}
-		if start < 0 {
-			start = 0
-		}
+		lines := m.newsLines()
+		start := clampInt(m.newsOffset, 0, max(0, len(lines)-1))
 		end := start + innerH
 		if end > len(lines) {
 			end = len(lines)
 		}
-		content = lipgloss.NewStyle().MaxWidth(tw - 4).Render(strings.Join(lines[start:end], "\n"))
+		win := lines[start:end]
+
+		// Pad to a fixed block width so Place moves the column as one unit —
+		// otherwise every line centres on its own and the left edge zig-zags.
+		blockW := 0
+		for _, ln := range win {
+			if w := lipgloss.Width(ln); w > blockW {
+				blockW = w
+			}
+		}
+		padded := make([]string, len(win))
+		for i, ln := range win {
+			padded[i] = ln + strings.Repeat(" ", max(0, blockW-lipgloss.Width(ln)))
+		}
+		// Centred horizontally; top-aligned once it's long enough to scroll.
+		vAlign := lipgloss.Center
+		if len(win) >= innerH {
+			vAlign = lipgloss.Top
+		}
+		content = lipgloss.Place(tw-4, innerH, lipgloss.Center, vAlign, strings.Join(padded, "\n"))
 	}
 	title := fmt.Sprintf("News — %d headlines  (j/k scroll, esc close)", len(m.newsFeed))
 	box := titledBox(title, tw-2, innerH, true, content)

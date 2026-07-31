@@ -56,6 +56,10 @@ type repoVM struct {
 	loaded    bool
 	fetching  bool
 	latestTag string // most recent tag, shown inline when showTagsInline is on
+	// fp is git.Fingerprint at the last probe, or 0 when never sampled. While a
+	// script runs it is compared against a fresh sample to find the repos worth
+	// re-stat'ing; see repoProbeMsg.
+	fp int64
 }
 
 // Model is the Bubble Tea model.
@@ -113,6 +117,14 @@ type Model struct {
 	outputOffset  int
 	outputRunning bool
 	outputRun     int // bumped per run; stale msgs from a superseded run are dropped
+	// probing is true between a script starting and finishing, while the repo
+	// fingerprint probe is armed; probeRun is the outputRun the live chain is
+	// tagged with. Each tick re-arms itself, so two chains for the SAME run would
+	// double the stat rate forever — but a new run must still arm its own,
+	// because the in-flight tick carries the superseded run and is dropped
+	// without re-arming. Hence a run-tagged guard rather than a bare bool.
+	probing  bool
+	probeRun int
 
 	// Debounced context loading. Moving the repo cursor loads the newly-highlighted
 	// repo's branches + graph, which is 2-3 git subprocesses — cheap once, but a
@@ -155,9 +167,13 @@ type Model struct {
 	prMine       []gh.PullRequest
 	prReview     []gh.PullRequest
 	prShowReview bool // false = my open PRs, true = review requested of me
-	prCursor     int
-	prLoaded     bool  // both lists have returned at least once
-	prErr        error // last load error (e.g. gh too old for `search prs`)
+	// prChosen records that the user picked a list with `m`. Until they do, the
+	// pane opens on whichever list has something in it (autoPickPRList); after
+	// they do, that choice stands and a background refresh can't move it.
+	prChosen bool
+	prCursor int
+	prLoaded bool  // both lists have returned at least once
+	prErr    error // last load error (e.g. gh too old for `search prs`)
 
 	// gh availability, resolved once at startup by ghProbeCmd. ghProbed flips true
 	// when the probe returns; ghInstalled = binary on PATH; ghAvailable = installed

@@ -1326,6 +1326,86 @@ func TestTUI_PRPaneToggle(t *testing.T) {
 	}
 }
 
+// Opening the PRs pane onto an empty list when the other one has nine items in
+// it wastes the press: you read "No open PRs authored by you", press m, and only
+// then see the work. So the pane opens on whichever list has something in it —
+// your own normally, review requests when yours are empty and reviews aren't.
+func TestTUI_PRPaneOpensOnTheListWithContent(t *testing.T) {
+	rk := func(s string) tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)} }
+	mk := func(t *testing.T, mine, review int) Model {
+		t.Helper()
+		cfg, repos := twoRepos(t)
+		m := loadAll(t, New(cfg, "", repos, nil), 120, 40)
+		m.ghProbed, m.ghAvailable, m.prLoaded = true, true, true
+		m.prMine = make([]gh.PullRequest, mine)
+		m.prReview = make([]gh.PullRequest, review)
+		return m
+	}
+
+	for _, tc := range []struct {
+		name          string
+		mine, review  int
+		wantShowRevie bool
+	}{
+		{"mine empty, reviews waiting", 0, 9, true},
+		{"mine has some", 2, 9, false},
+		{"both empty", 0, 0, false},
+		{"only mine", 3, 0, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := mk(t, tc.mine, tc.review)
+			mm, _ := m.Update(rk("4"))
+			if got := mm.(Model); got.prShowReview != tc.wantShowRevie {
+				t.Errorf("opened on prShowReview=%v, want %v (mine=%d review=%d)",
+					got.prShowReview, tc.wantShowRevie, tc.mine, tc.review)
+			}
+		})
+	}
+
+	// The lists load async, so `4` is usually pressed while both are still empty.
+	// The pick has to settle when they arrive, or the common case never fires.
+	t.Run("picks when the lists arrive after the pane is open", func(t *testing.T) {
+		cfg, repos := twoRepos(t)
+		m := loadAll(t, New(cfg, "", repos, nil), 120, 40)
+		m.ghProbed, m.ghAvailable = true, true
+		mm, _ := m.Update(rk("4")) // opened during the load: nothing to pick yet
+		m = mm.(Model)
+		if m.prShowReview {
+			t.Fatal("with nothing loaded it should sit on your own PRs")
+		}
+		mm, _ = m.Update(prsMsg{review: true, prs: make([]gh.PullRequest, 9)})
+		if !mm.(Model).prShowReview {
+			t.Error("nine review requests landing on an empty pane should be shown")
+		}
+	})
+
+	// An explicit m outlives a background refresh: `r` reloading both lists must
+	// not yank the pane back to the other one.
+	t.Run("m is respected afterwards", func(t *testing.T) {
+		m := mk(t, 0, 9)
+		mm, _ := m.Update(rk("4"))
+		m = mm.(Model)
+		if !m.prShowReview {
+			t.Fatal("should have opened on review requests")
+		}
+		mm, _ = m.Update(rk("m")) // deliberately back to my (empty) PRs
+		m = mm.(Model)
+		if m.prShowReview {
+			t.Fatal("m should have switched to my PRs")
+		}
+		mm, _ = m.Update(prsMsg{review: true, prs: make([]gh.PullRequest, 9)}) // a refresh
+		if mm.(Model).prShowReview {
+			t.Error("a refresh overrode the user's own choice")
+		}
+		mm, _ = m.Update(rk("3")) // leave and come back
+		m = mm.(Model)
+		mm, _ = m.Update(rk("4"))
+		if mm.(Model).prShowReview {
+			t.Error("reopening overrode the user's own choice")
+		}
+	})
+}
+
 // / in the PR pane filters the PR list only (not the repos), and leaving the pane
 // clears that filter.
 func TestTUI_PRFilterScoped(t *testing.T) {
@@ -1413,34 +1493,60 @@ func TestTUI_PRCheckoutDecision(t *testing.T) {
 		t.Errorf("dirty checkout should skip: status=%q", got)
 	}
 
-	// no matching local clone → not in view.
+	// no matching local clone → says which repo, and that it isn't in the tree.
 	m.repos[0].status.DirtyCount = 0
 	m.prMine = []gh.PullRequest{{Number: 9, RepoSlug: "nope/here"}}
 	mm, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	if got := stripANSI(mm.(Model).statusLine); !strings.Contains(got, "not in view") {
-		t.Errorf("unmatched PR should say not in view: status=%q", got)
+	if got := stripANSI(mm.(Model).statusLine); !strings.Contains(got, "nope/here isn't in this tree") {
+		t.Errorf("unmatched PR should name the missing repo: status=%q", got)
 	}
 }
 
 // After a SUCCESSFUL PR checkout the app lands on that repo's Branches sub-view
 // (topView reset to tvBranches), not the PR list — ready to review. A FAILED
 // checkout leaves you on the PRs view with an error.
-func TestTUI_PRCheckoutLandsOnBranches(t *testing.T) {
+// A PR spans several repos, so checking one out is rarely the last thing you
+// want to do — you walk the list checking out three of them. Landing you on the
+// Branches pane of one repo after each enter breaks that walk: you have to
+// travel back to 4, re-toggle to review requests, and find your place. So the
+// checkout changes the repo and nothing else: focus, sub-view, PR cursor and
+// repo cursor all stay exactly where they were.
+func TestTUI_PRCheckoutKeepsYouInThePRList(t *testing.T) {
 	cfg, repos := twoRepos(t)
 	m := loadAll(t, New(cfg, "", repos, nil), 120, 40)
 	m.focus, m.topView, m.prShowReview, m.prCursor = panelBranches, tvPRs, true, 3
-	target := m.repos[1].repo.Path
+	m.cursor = 0
+	target := m.repos[1].repo.Path // NOT the repo under the cursor
 
-	mm, _ := m.Update(prCheckoutDoneMsg{path: target, number: 42, err: nil})
+	mm, cmd := m.Update(prCheckoutDoneMsg{path: target, number: 42, err: nil})
 	got := mm.(Model)
-	if got.focus != panelBranches || got.topView != tvBranches {
-		t.Fatalf("checkout should land on the Branches sub-view, got focus=%v topView=%v", got.focus, got.topView)
+	if got.focus != panelBranches || got.topView != tvPRs {
+		t.Errorf("checkout must leave you in the PR list, got focus=%v topView=%v", got.focus, got.topView)
 	}
-	if got.cursor != 1 {
-		t.Errorf("cursor should move to the checked-out repo (index 1), got %d", got.cursor)
+	if got.prCursor != 3 {
+		t.Errorf("the PR cursor must not move, got %d want 3", got.prCursor)
+	}
+	if got.cursor != 0 {
+		t.Errorf("the repo cursor must not move, got %d want 0", got.cursor)
+	}
+	if !got.prShowReview {
+		t.Error("the my/review toggle must not be reset")
 	}
 	if s := stripANSI(got.statusLine); !strings.Contains(s, "checked out PR #42") {
 		t.Errorf("status should confirm the checkout, got %q", s)
+	}
+	// Pane 1 still has to show the new branch, so the repo is re-stat'd.
+	if cmd == nil {
+		t.Error("a successful checkout must still refresh the repo's status")
+	}
+
+	// A repo `/` filter is left alone: nothing moved, so nothing needs escaping.
+	m3 := loadAll(t, New(cfg, "", repos, nil), 120, 40)
+	m3.focus, m3.topView = panelBranches, tvPRs
+	m3.filter, m3.filterPanel = "alpha", panelRepos
+	mm, _ = m3.Update(prCheckoutDoneMsg{path: target, number: 7, err: nil})
+	if g := mm.(Model); g.filter != "alpha" || g.filterPanel != panelRepos {
+		t.Errorf("checkout must not clear an unrelated repo filter, got %q on %v", g.filter, g.filterPanel)
 	}
 
 	// a failed checkout stays on the PRs view with an error status.
@@ -1449,6 +1555,27 @@ func TestTUI_PRCheckoutLandsOnBranches(t *testing.T) {
 	mm, _ = m2.Update(prCheckoutDoneMsg{path: target, number: 42, err: fmt.Errorf("boom")})
 	if g := mm.(Model); g.topView != tvPRs || !strings.Contains(stripANSI(g.statusLine), "failed") {
 		t.Errorf("failed checkout should stay on PRs with an error, topView=%v status=%q", g.topView, stripANSI(g.statusLine))
+	}
+}
+
+// Panes 3/5/6 show the repo under the REPO cursor, so they only go stale when
+// the thing that changed is that repo. Reloading them for any other repo would
+// spend two or three git subprocesses redrawing what is already correct — and
+// with a PR list spanning a dozen repos, on nearly every checkout.
+func TestTUI_ContextReloadsOnlyForTheHighlightedRepo(t *testing.T) {
+	cfg, repos := twoRepos(t)
+	m := loadAll(t, New(cfg, "", repos, nil), 120, 40)
+	m.cursor = 0
+	here, elsewhere := m.repos[0].repo.Path, m.repos[1].repo.Path
+
+	if cmd := m.loadContextIfCurrent(here); cmd == nil {
+		t.Error("a change to the highlighted repo must reload its panes")
+	}
+	if cmd := m.loadContextIfCurrent(elsewhere); cmd != nil {
+		t.Error("a change to some other repo must not reload the panes")
+	}
+	if cmd := m.loadContextIfCurrent(""); cmd != nil {
+		t.Error("an empty path must not reload the panes")
 	}
 }
 

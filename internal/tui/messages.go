@@ -143,6 +143,15 @@ type ctxDebounceMsg struct {
 	gen int
 }
 
+// repoProbeMsg carries a git.Fingerprint per repo path, sampled off the render
+// loop while a script is running so the Repos pane can follow along with what
+// the script is doing. run is the Model.outputRun it belongs to; a tick from a
+// superseded run is dropped, the same guard scriptOutMsg uses.
+type repoProbeMsg struct {
+	run int
+	fps map[string]int64
+}
+
 // graphMsg carries the colored graph lines plus commit entries for the graph view.
 type graphMsg struct {
 	path    string

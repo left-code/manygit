@@ -27,10 +27,17 @@ const (
 // (never appended), so it can't grow. Reused across restarts while it's fresh.
 type cachedNews struct {
 	CachedAt  time.Time `json:"cached_at"`
-	Days      int       `json:"days"` // the NewsDays window it summarized
-	Sig       string    `json:"sig"`  // repo-set signature (see repoSig)
+	Days      int       `json:"days"`             // the NewsDays window it summarized
+	Sig       string    `json:"sig"`              // repo-set signature (see repoSig)
+	Format    int       `json:"format,omitempty"` // newsFormat the prompt produced
 	Headlines []string  `json:"headlines"`
 }
+
+// newsFormat is the shape the prompt asks the harness for. Bump it whenever that
+// prompt changes so a cache written by the old one is discarded instead of
+// rendered — headlines from before the "Title: detail" format have no colon to
+// split on, and would show as headings with no explanation for a whole newsTTL.
+const newsFormat = 1
 
 // newsCachePath is the single cache file, under $XDG_CACHE_HOME/manygit (or
 // ~/.cache/manygit).
@@ -55,6 +62,9 @@ func loadNewsCache() (cachedNews, bool) {
 	var c cachedNews
 	if err := json.Unmarshal(data, &c); err != nil {
 		return cachedNews{}, false
+	}
+	if c.Format != newsFormat {
+		return cachedNews{}, false // written by an older prompt; re-summarize
 	}
 	return c, true
 }
@@ -122,7 +132,9 @@ func newsRefreshCmd(h harness.Harness, dir string, repos []newsRepo, days, gen i
 		if !any {
 			return newsFeedMsg{gen: gen}
 		}
-		prompt := fmt.Sprintf(`Below are recent commits on the main branch of several git repositories. Write a "news feed" of the notable activity — new features, fixes, releases. Summarize it into AT MOST 10 punchy headlines (fewer if there's little activity), grouping related commits; each headline up to 15 words. One headline per line. No numbering, no markdown, no preamble.
+		prompt := fmt.Sprintf(`Below are recent commits on the main branch of several git repositories. Write a "news feed" of the notable activity — new features, fixes, releases. Summarize it into AT MOST 10 entries (fewer if there's little activity), grouping related commits.
+
+Write each entry on ONE line as "Title: detail" — a short title of at most 8 words, then a colon, then one clause of detail of at most 15 words. Use exactly one colon per line, in that position. One entry per line. No numbering, no markdown, no preamble.
 
 %s`, b.String())
 		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
@@ -134,6 +146,21 @@ func newsRefreshCmd(h harness.Harness, dir string, repos []newsRepo, days, gen i
 		}
 		return newsFeedMsg{gen: gen, headlines: headlines, err: err}
 	}
+}
+
+// splitHeadline cuts a headline into its changelog heading and the explanation
+// after it, on the FIRST colon. A headline with no colon — an older cached feed,
+// or one the harness wrote as a single clause — is all heading and no detail,
+// which renders as a bare entry rather than an empty one.
+//
+// A leading colon is not a title, so that line is kept whole; likewise a
+// trailing one contributes no detail.
+func splitHeadline(h string) (head, detail string) {
+	i := strings.Index(h, ":")
+	if i <= 0 {
+		return strings.TrimSpace(h), ""
+	}
+	return strings.TrimSpace(h[:i]), strings.TrimSpace(h[i+1:])
 }
 
 // parseHeadlines turns harness output into clean one-line headlines (dropping

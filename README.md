@@ -94,6 +94,10 @@ Status column: `ok` up to date · `↑N` ahead · `↓N` behind · `*N` dirty ·
 branch has no upstream, or git errored. Set `status_glyphs: ascii` (in config or
 `?` then `tab`) if the arrows misalign.
 
+The column stays live without being asked: a PR checkout, a script, or a `:` plan
+updates the rows it touches as it touches them, and everything is re-read once
+when the run ends.
+
 ## GitHub PRs (tab `4`, beside Branches)
 
 If the [`gh` CLI](https://cli.github.com) is installed and signed in
@@ -104,17 +108,32 @@ to the harness in the footer. The tab lists two sets, toggled with `m`:
 - **mine** — your open pull requests
 - **review requests** — PRs waiting on *your* review
 
-Each row shows the repo, title, and author. A compact count of both appears at the
-right end of the top bar. Use `/` to filter and `j`/`k` to move, like every other
-list. Press `enter` on a PR to **check out its branch** in the matching local
-clone (matched by the origin remote) — manygit runs `gh pr checkout`, which
-handles forks and tracking, and then jumps you to that repo's Branches so you can
-review right away. It only checks out when the repo is in view and its working
-tree is clean; otherwise it says why. `r` refreshes the PR lists along with the
-repos.
+It opens on whichever has something in it; picking one with `m` then sticks.
 
-Needs `gh` 2.12+ (for `gh search prs`). Without `gh`, the pane simply shows a
-hint and the top-bar/footer GitHub bits are omitted.
+Each PR takes two lines — number, author and title, then the repo and **what
+merges where**:
+
+```
+ > #91  @zameel7  Bump the cluster to Kubernetes 1.30
+     k8s-manifests (staging): staging ← chore/k8s-1.30
+```
+
+The name in parentheses is the branch that clone is on. It goes green once it
+matches the PR's branch, and is absent when the repo isn't in your tree.
+
+A compact count of both lists appears at the right end of the top bar. Use `/` to
+filter and `j`/`k` to move, like every other list. Press `enter` on a PR to
+**check out its branch** in the matching local clone (matched by the origin
+remote) — manygit runs `gh pr checkout`, which handles forks and tracking. It
+only checks out when the repo is in view and its working tree is clean;
+otherwise it says why. `r` refreshes the PR lists along with the repos.
+
+**`enter` leaves you exactly where you are** — focus, both cursors and any active
+filter all stay put, so you can walk a PR that spans several repos. The affected
+repo's row in the Repos pane updates in place instead.
+
+Needs `gh` installed and signed in. Without it the pane shows a hint and the
+top-bar/footer GitHub bits are omitted.
 
 ## Config (optional)
 

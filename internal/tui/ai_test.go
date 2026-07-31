@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -452,8 +453,14 @@ func TestAI_ConfirmRunsThePlanForReal(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("y should have produced the exec command")
 	}
-	mm, _ = m.Update(cmd())
-	m = mm.(Model)
+	// y now returns a tea.Batch — the exec plus the repo probe that follows the
+	// commands live — so the exec message has to be pulled out of the batch
+	// rather than assumed to be the single return. fastMsgs drops the probe's
+	// 1.2s Tick, which is exactly what a real event loop would still be waiting on.
+	for _, msg := range fastMsgs(t, cmd, 2*time.Second) {
+		mm, _ = m.Update(msg)
+		m = mm.(Model)
+	}
 
 	if out, err := gitOut(alpha, "tag", "--list"); err != nil || out != "v0.0.9" {
 		t.Fatalf("tag list = %q (err %v) — the plan did not actually run", out, err)

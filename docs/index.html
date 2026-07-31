@@ -518,6 +518,10 @@
               </tbody>
             </table>
             <p>
+              These stay live without being asked — a PR checkout, a script, or a <b>:</b> plan
+              updates the rows it touches as it touches them.
+            </p>
+            <p>
               If the arrows misalign in your terminal, switch to ASCII <code>+</code>/<code>-</code>
               in the settings face — press <b>?</b> then <b>tab</b>, in the demo above too.
             </p>
@@ -532,20 +536,14 @@
               If the <code>gh</code> CLI is signed in, a PRs tab appears next to Branches.
             </p>
             <p>
-              Press <b>4</b>. One list is the pull requests you opened; <b>m</b> toggles to the ones
-              waiting on your review. A count of both sits at the right end of the top bar, so you
-              see it without opening the tab.
+              Press <b>4</b>. One list is the pull requests you opened, <b>m</b> toggles to the ones
+              waiting on your review, and it opens on whichever has something in it. Each row shows
+              what merges where — <code>base ← head</code> — and the branch that clone is on.
             </p>
             <p>
-              Press <b>enter</b> on a PR and manygit checks out its branch in the matching local
-              clone — it maps the PR to a repo by its origin remote, runs
-              <code>gh pr checkout</code> (which handles forks and tracking), and lands you on that
-              repo's Branches, ready to read the diff. It only does this when the repo is in view and
-              its working tree is clean. Otherwise it tells you which of the two is in the way.
-            </p>
-            <p>
-              Needs <code>gh</code> 2.12 or newer. Without it, the tab shows a hint and the rest of
-              manygit carries on as normal.
+              <b>enter</b> checks the PR's branch out in the matching local clone and leaves you
+              where you are, so you can walk a PR that spans several repos. Needs
+              <code>gh</code> signed in.
             </p>
           </div>
         </section>
