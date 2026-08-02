@@ -3,14 +3,25 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>manygit — a lazygit-style TUI for many git repos, on one screen</title>
+    <!-- The head is where the search vocabulary lives, because the body is
+         deliberately terse. People arrive by typing the CATEGORY ("a cli tool to
+         manage multiple git repos"), not the name — so the title and description
+         say it in those words, while the visible copy keeps its own voice.
+         The wedge against gita / mani / mu-repo / meta, which own that phrase: they
+         are batch runners that print output, this is an interactive TUI you stay
+         in. Hence "lazygit-style" earns its place in the title. -->
+    <title>manygit — manage multiple git repos with one CLI tool (lazygit-style TUI)</title>
     <meta
       name="description"
-      content="manygit is a lazygit-style terminal UI for a folder full of git repositories. See which repos are ahead, behind, or dirty across all of them at once, then fetch, pull, push and switch branches without cd-ing between them. A free single binary for macOS and Linux — try the real interface in your browser."
+      content="Manage multiple git repositories from one CLI — a lazygit-style TUI putting every repo's ahead/behind/dirty status on one screen. Try it in your browser."
     />
+    <!-- Inert: Google has ignored meta keywords since 2009 and Bing reads them as
+         a spam signal. Kept only as a written record of the queries this page is
+         written for — the ones that matter are carried by the title, the
+         description, the first paragraph and the FAQ block below. -->
     <meta
       name="keywords"
-      content="lazygit alternative, lazygit for multiple repos, git tui, terminal ui for git, manage multiple git repositories, multi-repo tool, git status all repos, check all git repos at once, monorepo of repos, git workspace manager, bulk git pull, terminal git client, go cli, bubbletea"
+      content="cli tool to manage multiple git repositories, manage many git repos, lazygit alternative, lazygit for multiple repos, gita alternative, mani alternative, git tui, terminal ui for git, multi-repo tool, git status all repos, check all git repos at once, monorepo of repos, git workspace manager, bulk git pull, terminal git client, go cli, bubbletea"
     />
     <meta name="author" content="Rabeeh T A" />
     <link rel="canonical" href="https://rabeeh-ta.github.io/manygit/" />
@@ -53,15 +64,81 @@
         "downloadUrl": "https://github.com/rabeeh-ta/manygit/releases",
         "codeRepository": "https://github.com/rabeeh-ta/manygit",
         "programmingLanguage": "Go",
-        "softwareVersion": "1.0.8",
+        "softwareVersion": "1.1.3",
         "screenshot": "https://rabeeh-ta.github.io/manygit/assets/og.png",
-        "description": "A lazygit-style terminal UI for a folder full of git repositories. Shows every repo underneath on one screen — ahead, behind, or dirty — and fetches, pulls, pushes and switches branches on the one under the cursor.",
+        "description": "A CLI tool to manage multiple git repositories at once. manygit is a lazygit-style terminal UI for a whole tree of git repos: it shows every repo underneath on one screen — ahead, behind, or dirty — and fetches, pulls, pushes and switches branches on the one under the cursor, without cd-ing between them.",
+        "keywords": "manage multiple git repositories, multi-repo git CLI, git TUI, lazygit alternative, terminal UI for git, git status all repos",
+        "featureList": [
+          "See ahead / behind / dirty status for every repo in a folder on one screen",
+          "Fetch, pull, push and switch branches on the repo under the cursor",
+          "Filter to only the repos that are changed or unsynced",
+          "Browse GitHub pull requests and check one out, via the gh CLI",
+          "Full-screen commit graph per repo",
+          "Run project scripts across repos"
+        ],
         "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
         "author": {
           "@type": "Person",
           "name": "Rabeeh T A",
           "url": "https://github.com/rabeeh-ta"
         }
+      }
+    </script>
+
+    <!-- Question-shaped queries, answered in machine-readable form. This is the
+         one lever that adds search surface WITHOUT adding prose to the page —
+         the landing page stays terse on purpose. Note it will not draw an FAQ
+         rich result: Google restricted those to government and health sites in
+         2023. It earns its keep with the answer engines (ChatGPT, Perplexity,
+         Google AI Overviews), which do read JSON-LD, and alongside llms.txt.
+         Every answer must stay true to the binary — this is documentation that
+         happens to be structured, not marketing copy. -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "FAQPage",
+        "mainEntity": [
+          {
+            "@type": "Question",
+            "name": "Is there a CLI tool to manage multiple git repositories at once?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "manygit is one. You point it at a folder, it finds every git repo nested up to three levels underneath, and puts them all on a single screen with each repo's branch and whether it is ahead, behind, or dirty. You then fetch, pull, push, or switch branches on the repo under the cursor without cd-ing between them. It is a free single binary for macOS and Linux."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "How do I check the git status of all my repos at once?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "The usual approach is a shell loop such as: for d in */; do (cd \"$d\" && git status); done — which works but prints a wall of text with no branch names and no sense of ahead versus behind. manygit replaces that loop with a screen: one row per repo, a status column reading ok, up-arrow N for commits to push, down-arrow N to pull, star N for changed files, or no-remote, and a key to act on any row. Press F to hide everything that is already clean and in sync."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "What is a lazygit alternative that works across multiple repositories?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "lazygit is a terminal UI for one repository at a time. manygit is the same idea one directory up: a lazygit-style TUI for a whole tree of repos. It is keyboard-driven in the same way — panes, j and k to move, single-key actions — but the list you start from is every repo in the folder rather than the files in one."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "How is manygit different from gita, mani, or mu-repo?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Those tools are batch command runners: you register repos in a config file, then broadcast a git or shell command to all of them and read the printed output. manygit is an interactive TUI with no config file to maintain — it discovers repos by walking the folder, keeps their status live on screen, and lets you act on one repo at a time from the list. It also carries a commit graph, a script runner, and a GitHub pull-request pane when the gh CLI is installed."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Can I try manygit without installing it?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Yes. The landing page at https://rabeeh-ta.github.io/manygit/ runs a working browser port of the interface. The git operations are simulated, but the keybindings and the interaction model are the real ones from the binary."
+            }
+          }
+        ]
       }
     </script>
 
@@ -173,7 +250,7 @@
           <span class="bar" aria-hidden="true"><i></i><i></i><i></i></span>
           <span class="wordmark__txt">manygit</span>
         </a>
-        <span class="chip chip--ver">v1.0.8</span>
+        <span class="chip chip--ver">v1.1.3</span>
         <button class="chip chip--btn" type="button" id="mode" data-mode-toggle="terminal" aria-live="polite">light</button>
         <a class="chip" href="https://github.com/rabeeh-ta/manygit">github</a>
       </div>
@@ -189,12 +266,18 @@
           </div>
           <div>
             <h1>Which of your repos are <em>dirty</em> right now?</h1>
+            <!-- The H1 stays a question because it is what the reader is already
+                 thinking. The category — the words people actually search — is
+                 carried by this first paragraph instead, in one plain clause. It
+                 is the highest-weight body text on the page and the only place
+                 the phrase needs to appear; do not sprinkle it further. -->
             <p class="hero__sub">
               If you keep a folder full of them — services, packages, plugins — answering that means
-              <code>cd</code>-ing through every one. manygit puts every repo underneath on one
-              screen: <strong>ahead</strong>, <strong>behind</strong>, <strong>dirty</strong>, clean.
-              Then fetch, pull, push, or switch branches on the one under your cursor, without
-              leaving the list.
+              <code>cd</code>-ing through every one. manygit is a single CLI tool for managing
+              multiple git repositories: every repo underneath lands on one screen —
+              <strong>ahead</strong>, <strong>behind</strong>, <strong>dirty</strong>, clean — then
+              fetch, pull, push, or switch branches on the one under your cursor, without leaving
+              the list.
             </p>
 
             <div class="hero__cta">
@@ -483,7 +566,8 @@
           <h2 class="lane">Status</h2>
           <div class="sec__body">
             <p class="sec__lede">
-              The right-hand column of the Repos pane, in one glance per repo.
+              The right-hand column of the Repos pane — every repo's git status at once, one glance
+              each.
             </p>
             <table class="kt">
               <tbody>
@@ -721,7 +805,7 @@
       /* Keep the version badge current without a build step: read the latest
          release from the GitHub API and update the masthead chip (and the
          JSON-LD softwareVersion, for crawlers that render JS). The hardcoded
-         v1.0.8 above is the instant, offline, rate-limited fallback — if this
+         v1.1.3 above is the instant, offline, rate-limited fallback — if this
          fetch fails for any reason the baked-in value simply stays. Mirrors the
          tool itself, which checks for a newer release on every launch. Plain GET,
          no custom headers, so it's a simple CORS request with no preflight. */

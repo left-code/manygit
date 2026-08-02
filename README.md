@@ -1,10 +1,15 @@
 # manygit
 
-A lazygit-style terminal UI for a whole **tree** of git repos. Point it at a
-folder and every repo underneath is on one screen: its branch, and whether it's
-ahead / behind / dirty. Fetch, pull, push, or switch branches on the one under
-the cursor — plus a commit graph, a script runner, and a GitHub pull-request pane
-(when the `gh` CLI is installed).
+**A single CLI tool to manage multiple git repositories** — a lazygit-style
+terminal UI for a whole **tree** of git repos. Point it at a folder and every
+repo underneath is on one screen: its branch, and whether it's ahead / behind /
+dirty. Fetch, pull, push, or switch branches on the one under the cursor — plus a
+commit graph, a script runner, and a GitHub pull-request pane (when the `gh` CLI
+is installed).
+
+Unlike batch runners like `gita` or `mani`, there's no config file to register
+repos in and no output to read back: manygit discovers them by walking the
+folder, and you stay in the list.
 
 ![manygit filtering a tree of repos by branch, browsing pull requests, and switching themes](docs/assets/demo.gif)
 

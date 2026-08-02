@@ -1,9 +1,10 @@
 # manygit
 
-> A lazygit-style terminal UI for a whole tree of git repos. Point it at a
-> directory and it shows every git repository nested under it on one screen — which
-> are ahead, behind, or dirty — then fetches, pulls, pushes, and switches
-> branches on the one under the cursor, without cd-ing between them.
+> A single CLI tool to manage multiple git repositories: a lazygit-style terminal
+> UI for a whole tree of git repos. Point it at a directory and it shows every git
+> repository nested under it on one screen — which are ahead, behind, or dirty —
+> then fetches, pulls, pushes, and switches branches on the one under the cursor,
+> without cd-ing between them.
 
 manygit is a single Go binary for macOS and Linux, built with Bubble Tea and
 Lip Gloss. It is free and open source at https://github.com/rabeeh-ta/manygit
@@ -19,6 +20,21 @@ workspace of packages, a folder of plugins, nested at whatever depth — answeri
 
 manygit replaces that loop with a screen you can act from. It is to a folder of
 repos what lazygit is to a single repo.
+
+## How it compares to other multi-repo tools
+
+Most tools in this space — `gita`, `mani`, `mu-repo`, `meta`, `myrepos` — are
+batch command runners: you register repos in a config file, broadcast a git or
+shell command to all of them, and read the printed output. They are good at
+running one command across many repos.
+
+manygit is the interactive counterpart. There is no config file to maintain: it
+discovers repos by walking the directory, keeps their status live on screen, and
+you act on one repo at a time from the list without leaving it. Pick a batch
+runner to script across repos; pick manygit to *look* at them and work.
+
+Compared to `lazygit`, which manygit is modelled on: lazygit is a TUI for one
+repository, manygit is a TUI for the folder containing many.
 
 ## Install
 
