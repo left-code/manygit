@@ -40,7 +40,14 @@ repository, manygit is a TUI for the folder containing many.
 
 macOS, via Homebrew:
 
-    brew tap rabeeh-ta/manygit && brew install manygit
+    brew tap rabeeh-ta/manygit
+    brew trust rabeeh-ta/manygit
+    brew install manygit
+
+The trust step is required from Homebrew 6 onwards: casks in a third-party tap can
+run arbitrary Ruby, so Homebrew refuses to load them until the tap is trusted.
+`brew trust --cask rabeeh-ta/manygit/manygit` trusts only manygit instead of the
+whole tap.
 
 macOS and Linux, via the installer script:
 

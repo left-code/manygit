@@ -35,7 +35,11 @@ checksum:
   name_template: "checksums.txt"
 
 # The Homebrew cask, pushed to rabeeh-ta/homebrew-manygit on every tag:
-#   brew tap rabeeh-ta/manygit && brew install manygit
+#   brew tap rabeeh-ta/manygit && brew trust rabeeh-ta/manygit && brew install manygit
+#
+# The trust step is not optional: since Homebrew 6.0.0 a non-official tap is not
+# loaded until the user trusts it. Nothing here can waive that — it is a decision
+# Homebrew reserves for the machine running the code.
 #
 # Casks are macOS-only by design; Linux installs through install.sh. Note the
 # cask points at the SAME archive install.sh downloads — there is no separate

@@ -23,8 +23,15 @@ real keys.</sub>
 
 ```bash
 brew tap rabeeh-ta/manygit
+brew trust rabeeh-ta/manygit
 brew install manygit
 ```
+
+Since Homebrew 6, casks from a third-party tap aren't loaded until you trust the
+tap — a cask can run arbitrary Ruby, so Homebrew makes you opt in. `brew trust`
+covers this tap's current and future contents; to trust only manygit and nothing
+else that ever lands here, use `brew trust --cask rabeeh-ta/manygit/manygit`
+instead.
 
 **macOS / Linux — installer script:**
 

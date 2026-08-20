@@ -284,12 +284,13 @@
               <div class="cmd">
                 <div class="cmd__txt" tabindex="0" role="group" aria-label="command, scrolls horizontally">
                   <span class="cmd__sigil">$</span
-                  >brew tap rabeeh-ta/manygit &amp;&amp; brew install manygit
+                  >brew tap rabeeh-ta/manygit &amp;&amp; brew trust rabeeh-ta/manygit
+                  &amp;&amp; brew install manygit
                 </div>
                 <button
                   class="cmd__copy"
                   type="button"
-                  data-copy="brew tap rabeeh-ta/manygit && brew install manygit"
+                  data-copy="brew tap rabeeh-ta/manygit && brew trust rabeeh-ta/manygit && brew install manygit"
                   aria-label="copy the Homebrew install command"
                 >
                   copy
@@ -376,17 +377,25 @@
             <div class="cmd">
               <div class="cmd__txt" tabindex="0" role="group" aria-label="command, scrolls horizontally">
                 <span class="cmd__sigil">$</span
-                >brew tap rabeeh-ta/manygit &amp;&amp; brew install manygit
+                >brew tap rabeeh-ta/manygit &amp;&amp; brew trust rabeeh-ta/manygit
+                &amp;&amp; brew install manygit
               </div>
               <button
                 class="cmd__copy"
                 type="button"
-                data-copy="brew tap rabeeh-ta/manygit && brew install manygit"
+                data-copy="brew tap rabeeh-ta/manygit && brew trust rabeeh-ta/manygit && brew install manygit"
                   aria-label="copy the Homebrew install command"
               >
                 copy
               </button>
             </div>
+
+            <p>
+              The <code>trust</code> step is required from Homebrew 6 onwards. A cask in a
+              third-party tap can run arbitrary Ruby, so Homebrew refuses to load one until you
+              opt in. Use <code>brew trust --cask rabeeh-ta/manygit/manygit</code> to trust only
+              manygit rather than everything this tap may ever hold.
+            </p>
 
             <p>
               Homebrew owns the binary it installs, so manygit never replaces it. When a newer
