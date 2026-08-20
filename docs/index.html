@@ -284,19 +284,18 @@
               <div class="cmd">
                 <div class="cmd__txt" tabindex="0" role="group" aria-label="command, scrolls horizontally">
                   <span class="cmd__sigil">$</span
-                  >curl -fsSL https://raw.githubusercontent.com/rabeeh-ta/manygit/main/install.sh |
-                  bash
+                  >brew tap rabeeh-ta/manygit &amp;&amp; brew install manygit
                 </div>
                 <button
                   class="cmd__copy"
                   type="button"
-                  data-copy="curl -fsSL https://raw.githubusercontent.com/rabeeh-ta/manygit/main/install.sh | bash"
-                  aria-label="copy the install command"
+                  data-copy="brew tap rabeeh-ta/manygit && brew install manygit"
+                  aria-label="copy the Homebrew install command"
                 >
                   copy
                 </button>
               </div>
-              <a class="chip" href="#install">other ways to install</a>
+              <a class="chip" href="#install">Linux and other ways to install</a>
             </div>
           </div>
         </div>
@@ -371,8 +370,31 @@
         <section class="sec" id="install">
           <h2 class="lane">Install</h2>
           <div class="sec__body">
-            <p class="sec__lede">One command. It drops a single binary in <code>~/.local/bin</code>.</p>
+            <p class="sec__lede">One command. A single binary, no runtime, no config to write.</p>
 
+            <h3>macOS &mdash; Homebrew</h3>
+            <div class="cmd">
+              <div class="cmd__txt" tabindex="0" role="group" aria-label="command, scrolls horizontally">
+                <span class="cmd__sigil">$</span
+                >brew tap rabeeh-ta/manygit &amp;&amp; brew install manygit
+              </div>
+              <button
+                class="cmd__copy"
+                type="button"
+                data-copy="brew tap rabeeh-ta/manygit && brew install manygit"
+                  aria-label="copy the Homebrew install command"
+              >
+                copy
+              </button>
+            </div>
+
+            <p>
+              Homebrew owns the binary it installs, so manygit never replaces it. When a newer
+              release lands it says so &mdash; at most once a day, after you quit &mdash; and
+              leaves <code>brew upgrade manygit</code> to you.
+            </p>
+
+            <h3>macOS and Linux &mdash; installer script</h3>
             <div class="cmd">
               <div class="cmd__txt" tabindex="0" role="group" aria-label="command, scrolls horizontally">
                 <span class="cmd__sigil">$</span
@@ -383,7 +405,7 @@
                 class="cmd__copy"
                 type="button"
                 data-copy="curl -fsSL https://raw.githubusercontent.com/rabeeh-ta/manygit/main/install.sh | bash"
-                  aria-label="copy the install command"
+                  aria-label="copy the installer-script command"
               >
                 copy
               </button>
@@ -391,9 +413,29 @@
 
             <p>
               The installer picks the right build for your OS and architecture, and adds
-              <code>~/.local/bin</code> to your PATH if it isn't there already. On every launch
-              manygit checks for a newer release and offers to update itself, so this is the last
-              time you'll run it.
+              <code>~/.local/bin</code> to your PATH if it isn't there already. This binary is
+              yours rather than a package manager's, so manygit checks for a newer release on
+              every launch and offers to update itself &mdash; the last time you'll run this.
+            </p>
+
+            <h3>With Go</h3>
+            <div class="cmd">
+              <div class="cmd__txt" tabindex="0" role="group" aria-label="command, scrolls horizontally">
+                <span class="cmd__sigil">$</span>go install github.com/rabeeh-ta/manygit@latest
+              </div>
+              <button
+                class="cmd__copy"
+                type="button"
+                data-copy="go install github.com/rabeeh-ta/manygit@latest"
+                  aria-label="copy the go install command"
+              >
+                copy
+              </button>
+            </div>
+
+            <p>
+              Managed by the Go toolchain, so it behaves like the Homebrew build: manygit reports
+              new releases but never replaces itself.
             </p>
 
             <h3>From source</h3>

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"manygit/internal/gh"
+	"github.com/rabeeh-ta/manygit/internal/gh"
 )
 
 // prModel is a Model with the PRs pane focused and one list loaded, plus two

@@ -1,4 +1,4 @@
-module manygit
+module github.com/rabeeh-ta/manygit
 
 go 1.24.0
 

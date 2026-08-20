@@ -8,7 +8,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"manygit/internal/discover"
+	"github.com/rabeeh-ta/manygit/internal/discover"
 )
 
 // Config is the effective configuration.

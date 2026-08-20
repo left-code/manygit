@@ -3,7 +3,7 @@ package tui
 import (
 	"strconv"
 
-	"manygit/internal/harness"
+	"github.com/rabeeh-ta/manygit/internal/harness"
 )
 
 // The ? settings screen is a flat radio list. Each selectable row is a

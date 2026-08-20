@@ -13,9 +13,9 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"manygit/internal/discover"
-	"manygit/internal/git"
-	"manygit/internal/harness"
+	"github.com/rabeeh-ta/manygit/internal/discover"
+	"github.com/rabeeh-ta/manygit/internal/git"
+	"github.com/rabeeh-ta/manygit/internal/harness"
 )
 
 // stubHarness swaps the one seam that reaches a real AI CLI. Every test here goes

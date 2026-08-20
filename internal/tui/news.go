@@ -13,8 +13,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"manygit/internal/git"
-	"manygit/internal/harness"
+	"github.com/rabeeh-ta/manygit/internal/git"
+	"github.com/rabeeh-ta/manygit/internal/harness"
 )
 
 const (

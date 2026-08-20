@@ -27,3 +27,6 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Fine-grained PAT scoped to rabeeh-ta/homebrew-manygit (contents:write).
+          # GITHUB_TOKEN above is scoped to this repo and cannot push to the tap.
+          TAP_GITHUB_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}

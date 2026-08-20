@@ -8,7 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"manygit/internal/discover"
+	"github.com/rabeeh-ta/manygit/internal/discover"
 )
 
 // drainScript runs a start command to completion, mirroring the Update loop:

@@ -5,8 +5,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"manygit/internal/discover"
-	"manygit/internal/git"
+	"github.com/rabeeh-ta/manygit/internal/discover"
+	"github.com/rabeeh-ta/manygit/internal/git"
 )
 
 // vm builds a loaded repoVM for the filter tests: a repo named `name` in group

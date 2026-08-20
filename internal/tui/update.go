@@ -9,11 +9,11 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"manygit/internal/aigit"
-	"manygit/internal/config"
-	"manygit/internal/discover"
-	"manygit/internal/git"
-	"manygit/internal/harness"
+	"github.com/rabeeh-ta/manygit/internal/aigit"
+	"github.com/rabeeh-ta/manygit/internal/config"
+	"github.com/rabeeh-ta/manygit/internal/discover"
+	"github.com/rabeeh-ta/manygit/internal/git"
+	"github.com/rabeeh-ta/manygit/internal/harness"
 )
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {

@@ -38,9 +38,24 @@ repository, manygit is a TUI for the folder containing many.
 
 ## Install
 
+macOS, via Homebrew:
+
+    brew tap rabeeh-ta/manygit && brew install manygit
+
+macOS and Linux, via the installer script:
+
     curl -fsSL https://raw.githubusercontent.com/rabeeh-ta/manygit/main/install.sh | bash
 
-From source (needs Go 1.24+):
+The installer-script build self-updates: it offers to replace itself when a newer
+release exists. A Homebrew or `go install` build is owned by that package manager,
+so manygit never replaces it — it reports the new release at most once a day, after
+you quit, and names the command that installs it.
+
+With Go (needs Go 1.24+):
+
+    go install github.com/rabeeh-ta/manygit@latest
+
+From source:
 
     git clone https://github.com/rabeeh-ta/manygit && cd manygit
     go build -o ~/.local/bin/manygit .

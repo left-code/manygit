@@ -8,11 +8,11 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
-	"manygit/internal/aigit"
-	"manygit/internal/config"
-	"manygit/internal/gh"
-	"manygit/internal/git"
-	"manygit/internal/harness"
+	"github.com/rabeeh-ta/manygit/internal/aigit"
+	"github.com/rabeeh-ta/manygit/internal/config"
+	"github.com/rabeeh-ta/manygit/internal/gh"
+	"github.com/rabeeh-ta/manygit/internal/git"
+	"github.com/rabeeh-ta/manygit/internal/harness"
 )
 
 // decoRefRe matches one colored token — <set-color><text><reset> — as emitted by

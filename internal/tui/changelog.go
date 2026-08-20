@@ -10,7 +10,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"manygit/internal/selfupdate"
+	"github.com/rabeeh-ta/manygit/internal/selfupdate"
 )
 
 // commitHashRe matches "* <hash> message", capturing the bullet so the hash can

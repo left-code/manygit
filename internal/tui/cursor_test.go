@@ -5,7 +5,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"manygit/internal/git"
+	"github.com/rabeeh-ta/manygit/internal/git"
 )
 
 func cursorKey(s string) tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)} }

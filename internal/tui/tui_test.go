@@ -17,10 +17,10 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/exp/teatest"
 
-	"manygit/internal/config"
-	"manygit/internal/discover"
-	"manygit/internal/gh"
-	"manygit/internal/git"
+	"github.com/rabeeh-ta/manygit/internal/config"
+	"github.com/rabeeh-ta/manygit/internal/discover"
+	"github.com/rabeeh-ta/manygit/internal/gh"
+	"github.com/rabeeh-ta/manygit/internal/git"
 )
 
 var ansiSeq = regexp.MustCompile(`\x1b\[[0-9;]*m`)

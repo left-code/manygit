@@ -9,7 +9,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"manygit/internal/discover"
+	"github.com/rabeeh-ta/manygit/internal/discover"
 )
 
 // writeFile drops a file into a repo the way a script would.

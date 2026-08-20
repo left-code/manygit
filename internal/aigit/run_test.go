@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"manygit/internal/git"
+	"github.com/rabeeh-ta/manygit/internal/git"
 )
 
 func TestExecute_RunsInOrder(t *testing.T) {

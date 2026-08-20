@@ -3,10 +3,10 @@ package tui
 import (
 	"bufio"
 
-	"manygit/internal/discover"
-	"manygit/internal/gh"
-	"manygit/internal/git"
-	"manygit/internal/selfupdate"
+	"github.com/rabeeh-ta/manygit/internal/discover"
+	"github.com/rabeeh-ta/manygit/internal/gh"
+	"github.com/rabeeh-ta/manygit/internal/git"
+	"github.com/rabeeh-ta/manygit/internal/selfupdate"
 )
 
 type statusMsg struct {

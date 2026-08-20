@@ -9,9 +9,9 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"manygit/internal/config"
-	"manygit/internal/discover"
-	"manygit/internal/harness"
+	"github.com/rabeeh-ta/manygit/internal/config"
+	"github.com/rabeeh-ta/manygit/internal/discover"
+	"github.com/rabeeh-ta/manygit/internal/harness"
 )
 
 // TestMain points XDG_CONFIG_HOME and XDG_CACHE_HOME at throwaway dirs for the

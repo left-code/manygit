@@ -19,7 +19,14 @@ real keys.</sub>
 
 ## Install
 
-macOS / Linux:
+**macOS — Homebrew:**
+
+```bash
+brew tap rabeeh-ta/manygit
+brew install manygit
+```
+
+**macOS / Linux — installer script:**
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/rabeeh-ta/manygit/main/install.sh | bash
@@ -29,6 +36,10 @@ This drops `manygit` into `~/.local/bin` (adding it to your PATH if needed), so
 you can run `manygit` from anywhere. On each launch it checks for a newer release
 and offers to update itself (`--no-update-check`, or `MANYGIT_NO_UPDATE_CHECK=1`,
 skips that).
+
+A Homebrew install works differently: Homebrew owns that binary, so manygit never
+replaces it. It tells you a release is out — at most once a day, after you quit —
+and leaves `brew upgrade manygit` to you.
 
 To install a **specific version** — rolling back, or pinning a machine — pass the
 tag:
@@ -42,12 +53,21 @@ installer. Since the launch check will then offer to pull you back to the newest
 release, answer `n` or use `--no-update-check` to stay put.
 
 <details>
-<summary>From source (needs Go 1.24+)</summary>
+<summary>With Go (needs Go 1.24+)</summary>
+
+```bash
+go install github.com/rabeeh-ta/manygit@latest
+```
+
+Or from a clone:
 
 ```bash
 git clone https://github.com/rabeeh-ta/manygit && cd manygit
 go build -o ~/.local/bin/manygit .
 ```
+
+A `go install` build is managed by the Go toolchain, so it behaves like the
+Homebrew one: manygit reports new releases but never replaces itself.
 </details>
 
 ## Usage

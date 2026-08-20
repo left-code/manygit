@@ -5,20 +5,28 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"syscall"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"manygit/internal/config"
-	"manygit/internal/discover"
-	"manygit/internal/harness"
-	"manygit/internal/selfupdate"
-	"manygit/internal/tui"
+	"github.com/rabeeh-ta/manygit/internal/config"
+	"github.com/rabeeh-ta/manygit/internal/discover"
+	"github.com/rabeeh-ta/manygit/internal/harness"
+	"github.com/rabeeh-ta/manygit/internal/selfupdate"
+	"github.com/rabeeh-ta/manygit/internal/tui"
 )
 
 var version = "0.1.0-dev"
+
+// ldflagVersion preserves what the linker stamped into version, captured before
+// ResolveVersion may replace it with the module version. installOwner needs the
+// original: a stamped ldflag is what tells a release build apart from a
+// `go install` one, and resolving first would erase that distinction.
+var ldflagVersion = version
 
 func main() {
 	root := flag.String("root", "", "directory to scan for repos (default: $MANYGIT_ROOT or cwd)")
@@ -40,6 +48,10 @@ Flags:
 	}
 	flag.Parse()
 
+	// GoReleaser stamps the version into the ldflag; `go install` leaves it at the
+	// source default and puts the version in build info. Resolve before any read.
+	version = selfupdate.ResolveVersion(version, mainModuleVersion())
+
 	if *showVersion {
 		fmt.Println("manygit", version)
 		return
@@ -54,13 +66,15 @@ Flags:
 
 	// Offer an update before taking over the screen. Skipped for dev builds and
 	// when disabled; silent on any network/API hiccup.
+	var updateNotice string
 	if !*noUpdate && os.Getenv("MANYGIT_NO_UPDATE_CHECK") == "" && selfupdate.IsRelease(version) {
-		maybeSelfUpdate(version)
+		updateNotice = maybeSelfUpdate(version)
 	}
 
 	cfg, err := config.Load("")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "config:", err)
+		showNotice(updateNotice)
 		os.Exit(1)
 	}
 
@@ -72,10 +86,12 @@ Flags:
 	repos, err := discover.Discover(scanRoot, discover.Options{MaxDepth: cfg.MaxDepth, Prune: cfg.PruneSet()})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "discover:", err)
+		showNotice(updateNotice)
 		os.Exit(1)
 	}
 	if len(repos) == 0 {
 		fmt.Fprintf(os.Stderr, "no git repositories found under %s (max depth %d)\n", scanRoot, cfg.MaxDepth)
+		showNotice(updateNotice)
 		os.Exit(1)
 	}
 
@@ -85,26 +101,85 @@ Flags:
 	p := tea.NewProgram(tui.New(cfg, scanRoot, repos, scripts), tea.WithAltScreen(), tea.WithReportFocus())
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
+		showNotice(updateNotice)
 		os.Exit(1)
 	}
+
+	showNotice(updateNotice)
 }
 
-// maybeSelfUpdate checks for a newer release and, if the user agrees, replaces
-// the running binary and re-execs into it. Runs before the TUI so it can prompt
-// on the plain terminal. Any failure is reported and then ignored (launch old).
-func maybeSelfUpdate(current string) {
+// showNotice prints a held-back update notice and records that it was shown.
+//
+// It is called on every exit path after the check runs, not just the successful
+// one: the notice is computed before the config and repo scan, so a config error
+// or an empty directory would otherwise swallow it. It is deliberately not
+// printed at the point it is computed — the TUI starts with WithAltScreen, which
+// clears the terminal and would wipe anything written beforehand.
+func showNotice(notice string) {
+	if notice == "" {
+		return
+	}
+	fmt.Println(notice)
+	selfupdate.MarkNotified(time.Now())
+}
+
+// noticeInterval is how often a managed install is reminded that a newer release
+// exists. It cannot act on the notice from in here, so a line every launch would
+// just become wallpaper.
+const noticeInterval = 24 * time.Hour
+
+// installOwner reports which package manager owns this binary, or SelfManaged.
+// The path is resolved through symlinks first because Homebrew links its bin
+// entry to the real file staged under the Caskroom.
+func installOwner() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return selfupdate.SelfManaged
+	}
+	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = resolved
+	}
+	return selfupdate.ManagedBy(exe, ldflagVersion, mainModuleVersion())
+}
+
+// mainModuleVersion is the version the Go toolchain recorded for the main module:
+// a real semver for `go install <pkg>@<version>`, "(devel)" for a plain go build.
+func mainModuleVersion() string {
+	bi, ok := debug.ReadBuildInfo()
+	if !ok {
+		return ""
+	}
+	return bi.Main.Version
+}
+
+// maybeSelfUpdate checks for a newer release. A self-managed install is offered
+// the update and, if the user agrees, has its binary replaced and re-execs into
+// it — that runs before the TUI so it can prompt on the plain terminal. A managed
+// install is never modified; it returns the notice to print once the TUI exits.
+// Any failure is reported and then ignored (launch old).
+func maybeSelfUpdate(current string) string {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	r, err := selfupdate.Latest(ctx)
 	if err != nil || r.Tag == "" || !selfupdate.NewerThan(r.Tag, current) {
-		return // offline, no release, or already current — say nothing
+		return "" // offline, no release, or already current — say nothing
+	}
+
+	// A managed install's binary belongs to a package manager. Name the command
+	// that updates it and never touch the file.
+	if owner := installOwner(); owner != selfupdate.SelfManaged {
+		notice := selfupdate.UpdateNotice(owner, r.Tag, current)
+		if notice == "" || !selfupdate.ShouldNotify(selfupdate.LastNotified(), time.Now(), noticeInterval) {
+			return ""
+		}
+		return notice
 	}
 
 	fmt.Printf("manygit %s is available (you have %s).\nUpdate now? [y/N] ", r.Tag, current)
 	var ans string
 	fmt.Scanln(&ans)
 	if strings.ToLower(strings.TrimSpace(ans)) != "y" {
-		return
+		return ""
 	}
 
 	fmt.Println("Updating...")
@@ -112,7 +187,7 @@ func maybeSelfUpdate(current string) {
 	defer dcancel()
 	if err := selfupdate.Apply(dctx, r); err != nil {
 		fmt.Fprintf(os.Stderr, "update failed: %v\ncontinuing on %s\n", err, current)
-		return
+		return ""
 	}
 
 	fmt.Printf("Updated to %s — relaunching...\n", r.Tag)
@@ -130,6 +205,7 @@ func maybeSelfUpdate(current string) {
 		fmt.Println("Please restart manygit to use the new version.")
 		os.Exit(0)
 	}
+	return ""
 }
 
 // printStats fetches the public GitHub download counts and prints a small table:

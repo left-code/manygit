@@ -16,8 +16,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"manygit/internal/gh"
-	"manygit/internal/git"
+	"github.com/rabeeh-ta/manygit/internal/gh"
+	"github.com/rabeeh-ta/manygit/internal/git"
 )
 
 // statusCmd loads local status (ungated — fast local read).

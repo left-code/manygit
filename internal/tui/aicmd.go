@@ -8,9 +8,9 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"manygit/internal/aigit"
-	"manygit/internal/git"
-	"manygit/internal/harness"
+	"github.com/rabeeh-ta/manygit/internal/aigit"
+	"github.com/rabeeh-ta/manygit/internal/git"
+	"github.com/rabeeh-ta/manygit/internal/harness"
 )
 
 // aiTimeout bounds the harness call. Longer than the news summary's 90s would

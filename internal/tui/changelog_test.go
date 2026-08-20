@@ -9,7 +9,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"manygit/internal/selfupdate"
+	"github.com/rabeeh-ta/manygit/internal/selfupdate"
 )
 
 // isolateCache points XDG_CACHE_HOME at a temp dir so the seen-marker read/write

@@ -6,8 +6,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"manygit/internal/aigit"
-	"manygit/internal/discover"
+	"github.com/rabeeh-ta/manygit/internal/aigit"
+	"github.com/rabeeh-ta/manygit/internal/discover"
 )
 
 // One Output pane, two producers. The script runner stamps its messages with

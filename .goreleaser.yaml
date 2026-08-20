@@ -29,9 +29,45 @@ archives:
     name_template: "manygit_{{ .Os }}_{{ .Arch }}"
     files:
       - README.md
+      - LICENSE
 
 checksum:
   name_template: "checksums.txt"
+
+# The Homebrew cask, pushed to rabeeh-ta/homebrew-manygit on every tag:
+#   brew tap rabeeh-ta/manygit && brew install manygit
+#
+# Casks are macOS-only by design; Linux installs through install.sh. Note the
+# cask points at the SAME archive install.sh downloads — there is no separate
+# brew build — which is why manygit works out who owns its binary at runtime
+# rather than from a build flag. See docs/adr/0001-runtime-install-ownership-detection.md.
+homebrew_casks:
+  - name: manygit
+    binaries:
+      - manygit
+    repository:
+      owner: rabeeh-ta
+      name: homebrew-manygit
+      # The workflow's default GITHUB_TOKEN is scoped to this repo only and
+      # cannot push to the tap. TAP_GITHUB_TOKEN is a fine-grained PAT limited
+      # to homebrew-manygit with contents:write.
+      token: "{{ .Env.TAP_GITHUB_TOKEN }}"
+    homepage: "https://rabeeh-ta.github.io/manygit/"
+    # Kept under 80 chars and not starting with an article, so `brew audit`
+    # passes if this ever moves to a formula.
+    description: "Lazygit-style TUI for a whole tree of git repos"
+    hooks:
+      post:
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/manygit"]
+          end
+    # Runs only on `brew uninstall --zap`, never a plain uninstall. Clears what
+    # manygit created and nothing else: ~/.config/manygit/config.yml is the
+    # user's own file and is deliberately left in place.
+    zap:
+      trash:
+        - "~/.cache/manygit"
 
 # The release body IS the in-app changelog: manygit fetches it over the GitHub
 # API and shows it once after a self-update (internal/tui/changelog.go). Grouping

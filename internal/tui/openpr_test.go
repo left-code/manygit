@@ -6,7 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"manygit/internal/gh"
+	"github.com/rabeeh-ta/manygit/internal/gh"
 )
 
 // `o` opens what you are looking at. In the PRs pane that is the highlighted
