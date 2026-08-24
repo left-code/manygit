@@ -43,6 +43,13 @@ all of them or the product and the site disagree:
 git-tracked and published from `docs/` alongside the page, and is the one people
 forget.
 
+Two more move with a key change and are just as easy to miss: `view.go` →
+`footer()` (the always-visible hint strip, mirrored in `demo.js`'s
+`statusOrFilter`), and the **Safety** sections in `README.md`, `docs/index.html`
+and `docs/llms.txt` — those make claims about what manygit can do to your repos,
+so a key that widens what it can do has to be reflected there or the page is
+lying. Adding `!` is what surfaced this.
+
 ### Rules the port must keep
 
 - **Copy strings verbatim** from the Go where the demo shows one (empty states,
@@ -62,7 +69,7 @@ forget.
   `:root[data-theme=…]` block and a `:root[data-mode="light"][data-theme=…]` one
   — theme.go's accents are tuned for a dark terminal and none of them pass on
   paper unmodified. Darken hue-preserving and **measure**; don't eyeball.
-- **The demo intentionally diverges in exactly four places**, all because it runs
+- **The demo intentionally diverges in exactly five places**, all because it runs
   in a browser:
   1. `q` explains itself instead of quitting.
   2. `o` explains itself instead of spawning an editor.
@@ -81,7 +88,16 @@ forget.
      the same way it says the git is fake — if you extend `cannedPlan`, keep that
      label true and never let it imply the model is actually running.
 
-  Keep all four, and keep them honest.
+  5. **`!` prints canned output instead of running a shell.** A browser has no
+     bash, so `cannedShell()` answers a few command shapes and everything else
+     says the shell is faked. Everything around it is real and ported: the repo
+     binding, the input line that stays open between commands, the history, the
+     echoed `<repo> $ <cmd>`, the streaming into the Output pane, and `esc`
+     leaving the mode without stopping the run. The page says the shell
+     output is scripted, the same way it says the git is fake — if you extend
+     `cannedShell`, keep that label true.
+
+  Keep all five, and keep them honest.
 - **`runInit()` is a port of `Init()`, not an animation.** First focus replays the
   real launch: every repo unloaded and immediately fetching, so a row goes
   `.` → `~` → its glyph as the local status read lands and then the fetch returns;

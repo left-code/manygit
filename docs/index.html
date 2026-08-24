@@ -307,8 +307,9 @@
         <div class="shell">
           <div class="demo__head">
             <span
-              >A working copy of the interface, running here. The git is fake and
-              <b>:</b>'s AI reply is scripted — the keys are the real keys.</span
+              >A working copy of the interface, running here. The git is fake, and
+              <b>:</b>'s AI reply and <b>!</b>'s shell output are scripted — the keys
+              are the real keys.</span
             >
             <span class="chip demo__cue--key">click to start it, then type · esc leaves</span>
             <span class="chip demo__cue--tap">swipe it · tap the keys below</span>
@@ -595,6 +596,19 @@
                   </td>
                 </tr>
                 <tr>
+                  <td class="kt__k"><b>!</b></td>
+                  <td>
+                    Shell in the highlighted repo. Opens a prompt naming where you are —
+                    <code>$manygit:apps/api-gateway</code>. Type a bash command —
+                    <i>git status -sb</i>, <i>npm test</i> — and it runs there, streaming
+                    into the Output pane. The prompt stays open, so it is a shell you sit
+                    in: run, read, run again. The bottom bar shows which repo you are in
+                    while you type. <b>esc</b> leaves the shell and lands on Repos;
+                    <b>ctrl+c</b> is what stops a running command. Non-interactive, so
+                    <code>vim</code> and <code>top</code> will not work
+                  </td>
+                </tr>
+                <tr>
                   <td class="kt__k"><b>?</b></td>
                   <td>
                     Help: the keybindings and the status legend, plus settings —
@@ -788,8 +802,15 @@
             <p>
               manygit never writes to the folder you launch it from. On its own it never
               force-pushes, merges, or rebases — <b>s</b> is fetch plus a fast-forward-only pull,
-              <b>p</b> is a plain push — and the one destructive action it offers directly is
-              discarding a repo's changes with <b>d</b> / <b>D</b>, which always asks first.
+              <b>p</b> is a plain push — and the one destructive action it offers on its own
+              is discarding a repo's changes with <b>d</b> / <b>D</b>, which always asks first.
+            </p>
+            <p>
+              <b>!</b> is the deliberate exception: it runs the bash command you type, in the
+              highlighted repo, with no confirm and no blocklist — a shell escape that
+              second-guessed you would be useless. What it does instead is leave a record:
+              the command is echoed into the Output pane with the repo it ran in, before any
+              output arrives, and <b>ctrl+c</b> stops it mid-run.
             </p>
             <p>
               <b>:</b> widens that on purpose, since merging and rebasing are the point of it. Every

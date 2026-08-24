@@ -348,6 +348,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, statusCmd(path), m.loadContextIfCurrent(path))
 		}
 		return m, tea.Batch(cmds...)
+	case runStartMsg:
+		// The pane may already have moved on — takeOutputPane could not have
+		// killed this one, because the process did not exist yet when it ran.
+		if msg.run != m.outputRun {
+			msg.cancel()
+			return m, nil
+		}
+		m.shellCancel = msg.cancel
+		return m, readScriptLine(msg.scanner, msg.run)
 	case scriptOutMsg:
 		stale := msg.run != m.outputRun // a superseded run (user started another script)
 		if msg.done {
@@ -356,10 +365,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.outputRunning = false
 			m.probing = false // the next tick finds it disarmed and stops
+			m.shellCancel = nil
 			var s string
-			if msg.err != nil {
+			switch {
+			case m.shellKilled:
+				s = styleOrange.Render(m.cancelledText())
+			case m.outputKind == outShell && msg.err != nil:
+				s = styleRed.Render(m.shellLoc + ": " + exitText(msg.err))
+			case m.outputKind == outShell:
+				s = styleGreen.Render(m.shellLoc + ": " + exitText(nil))
+			case msg.err != nil:
 				s = styleRed.Render("script " + m.outputTitle + " failed: " + msg.err.Error())
-			} else {
+			default:
 				s = styleGreen.Render("ran " + m.outputTitle)
 			}
 			// A script can change anything, in any repo — and it can dirty a tree
@@ -567,6 +584,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.filtering {
 		return m.handleFilterKey(msg)
 	}
+	// Above the overlay guards for the same reason aiPrompting is: a `?` or `g`
+	// inside a shell command is part of the command, not a request for an overlay.
+	if m.shellPrompting {
+		return m.handleShellPromptKey(msg)
+	}
 	// Above the overlay guards on purpose: a stray ? or g while you are typing a
 	// sentence must land in the sentence, not open a full-screen overlay.
 	if m.aiPrompting {
@@ -582,7 +604,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.confirmPlan = false
 		m.pendingPlan = aigit.Plan{}
 		if msg.String() == "y" {
-			m.takeOutputPane("running " + plural(len(plan.Steps), "command"))
+			m.takeOutputPane(outAI, "running "+plural(len(plan.Steps), "command"))
 			m.setBottomView(bvOutput)
 			// These are git commands against the repos, so the Repos pane follows
 			// them live exactly as it follows a script.
@@ -660,7 +682,15 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	vis := m.visibleRepos()
 	switch msg.String() {
-	case "q", "ctrl+c":
+	case "ctrl+c":
+		// Shell-like: while something is running, ctrl+c stops it rather than
+		// quitting. `q` always quits, so this can never trap anyone.
+		if m.outputRunning && m.shellCancel != nil {
+			m.killRunning()
+			return m, m.setStatus(styleOrange.Render(m.cancelledText()))
+		}
+		return m, tea.Quit
+	case "q":
 		return m, tea.Quit
 	case "?":
 		// ? is the universal "show me the keys" reflex, so it lands on the
@@ -828,6 +858,13 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// zoom, then the filters (which clear last, being what you most likely
 		// still want). One case fires per press; the switch's order is the nesting.
 		switch {
+		case m.outputRunning && m.shellCancel != nil &&
+			m.focus == panelBottom && m.bottomView == bvOutput:
+			// Scoped to the Output pane on purpose: esc's job everywhere else is
+			// "back out one layer", and killing a background command from inside a
+			// diff would be a nasty surprise. ctrl+c is the unscoped one.
+			m.killRunning()
+			return m, m.setStatus(styleOrange.Render(m.cancelledText()))
 		case m.focus == panelBottom && m.bottomView == bvChanges && m.changeShowDiff:
 			m.changeShowDiff = false
 		case m.focus == panelBottom && m.bottomView == bvChanges:
@@ -889,6 +926,25 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.filterPanel = panelRepos
 			m.cursor = 0
 		}
+	case "!":
+		// A shell in the highlighted repo. `!` is the key, vim's shell-escape
+		// convention — but what it OPENS renders as `<repo> $`, because `$` is the
+		// prompt character everyone reads as "shell" and it matches the
+		// `<repo> $ <cmd>` line the pane echoes back. Key follows the editors,
+		// symbol follows the shell.
+		//
+		// Bound to the cursor repo up front and shown in the prompt, so there is
+		// never a question which folder a command lands in, and so a background
+		// fetch cannot move it mid-type.
+		r := m.currentVisible(vis)
+		if r == nil {
+			return m, m.setStatus(styleOrange.Render("no repo selected"))
+		}
+		m.shellPrompting = true
+		m.shellCmd = ""
+		m.shellLoc = shellLocation(r.repo)
+		m.shellDir = r.repo.Path
+		m.shellHistIdx = len(m.shellHistory)
 	case ":":
 		// Plain-English git. Unlike `/` this is global, not scoped to a pane — the
 		// request names its own scope, defaulting to the repo under the cursor.
@@ -1060,7 +1116,7 @@ func (m Model) handleAIPromptKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		// No probe here: asking the harness a question runs nothing against the
 		// repos, so there is nothing for the Repos pane to follow.
-		m.takeOutputPane(m.cfg.Harness + ": " + req)
+		m.takeOutputPane(outAI, m.cfg.Harness+": "+req)
 		m.setBottomView(bvOutput)
 		m.appendOutput("")
 		m.appendAI(styleDim.Render("asking " + m.cfg.Harness + "..."))
@@ -1099,6 +1155,108 @@ func (m *Model) historyStep(d int) tea.Cmd {
 }
 
 // dropWord removes the last whitespace-separated word, and any spaces before it.
+// handleShellPromptKey owns every key while the `!` line is open. Like
+// handleAIPromptKey it switches on msg.Type — a closed set — so nothing from the
+// normal keymap can leak into a half-typed command.
+//
+// There is deliberately no tab-completion: `:` completes against a known
+// vocabulary of repo and branch names, but a shell line has no such list, and a
+// tab that silently did nothing would read as broken.
+func (m Model) handleShellPromptKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyEsc:
+		// esc leaves the shell and nothing else: a command already running keeps
+		// running and keeps streaming into the pane (ctrl+c is what stops one).
+		// Focus lands on Repos, because you left the shell to go do something to a
+		// repo — and the Output pane you were looking at cannot be scrolled while
+		// the prompt owns the keyboard anyway.
+		m.shellPrompting = false
+		m.shellCmd = ""
+		m.focus = panelRepos
+	case tea.KeyBackspace:
+		if msg.Alt { // opt+backspace on macOS
+			m.shellCmd = dropWord(m.shellCmd)
+			break
+		}
+		if r := []rune(m.shellCmd); len(r) > 0 {
+			m.shellCmd = string(r[:len(r)-1]) // by rune, so multi-byte survives
+		}
+	case tea.KeyCtrlW:
+		m.shellCmd = dropWord(m.shellCmd)
+	case tea.KeyCtrlU:
+		m.shellCmd = ""
+	case tea.KeyEnter:
+		return m.runShellLine()
+	case tea.KeyUp:
+		m.shellHistoryStep(-1)
+	case tea.KeyDown:
+		m.shellHistoryStep(+1)
+	case tea.KeyRunes, tea.KeySpace:
+		// KeySpace is matched explicitly: bubbletea re-types a lone space out of
+		// KeyRunes, so a handler that only matched KeyRunes would eat every space.
+		m.shellCmd += string(msg.Runes)
+	}
+	return m, nil
+}
+
+// shellHistoryStep walks the `!` history: -1 older, +1 newer, both clamped (no
+// wraparound). Entering the history stashes the half-typed line in shellDraft so
+// walking back to the end restores it — up-then-down is always a round trip.
+// Same semantics as historyStep for `:`; kept separate so the two histories
+// never bleed into each other.
+func (m *Model) shellHistoryStep(d int) {
+	if len(m.shellHistory) == 0 {
+		return
+	}
+	if m.shellHistIdx == len(m.shellHistory) {
+		m.shellDraft = m.shellCmd
+	}
+	i := m.shellHistIdx + d
+	if i < 0 {
+		i = 0
+	}
+	if i > len(m.shellHistory) {
+		i = len(m.shellHistory)
+	}
+	m.shellHistIdx = i
+	if i == len(m.shellHistory) {
+		m.shellCmd = m.shellDraft
+		return
+	}
+	m.shellCmd = m.shellHistory[i]
+}
+
+// runShellLine runs what was typed at `$` in the repo the prompt was bound to.
+// There is no confirm and no blocklist: `$` is an explicit shell escape, the way
+// vim's `:!` is, and a y/N on every `git status` would make it useless. What it
+// does instead is leave a record — the command is echoed into the pane, with the
+// repo it ran in, before a single line of output arrives.
+//
+// The prompt STAYS OPEN afterwards, so this is a shell you sit in rather than a
+// one-shot: run, read, run again. Only esc leaves.
+func (m Model) runShellLine() (tea.Model, tea.Cmd) {
+	line := strings.TrimSpace(m.shellCmd)
+	m.shellCmd = ""
+	if line == "" {
+		return m, nil
+	}
+	if m.shellDir == "" {
+		return m, m.setStatus(styleOrange.Render("no repo selected"))
+	}
+	if n := len(m.shellHistory); n == 0 || m.shellHistory[n-1] != line {
+		m.shellHistory = append(m.shellHistory, line)
+	}
+	m.shellHistIdx = len(m.shellHistory)
+
+	echo := m.shellLoc + " $ " + line
+	m.takeOutputPane(outShell, echo)
+	m.setBottomView(bvOutput)
+	m.appendOutput(styleTitle.Render(echo))
+	// A shell line can do anything to any repo, so the Repos pane follows it live
+	// exactly as it follows a script.
+	return m, tea.Batch(startShellCmd(line, m.shellDir, m.outputRun), m.startRepoProbe())
+}
+
 func dropWord(s string) string {
 	s = strings.TrimRight(s, " \t")
 	if i := strings.LastIndexAny(s, " \t"); i >= 0 {
@@ -1543,14 +1701,39 @@ func (m Model) repoPaths() []string {
 // It also drops the repo probe: the run that chain belonged to no longer owns
 // the pane, and its next tick would be discarded on the run guard anyway.
 // Producers that actually change repos re-arm with startRepoProbe.
-func (m *Model) takeOutputPane(title string) {
+func (m *Model) takeOutputPane(kind outputKind, title string) {
+	m.killRunning() // stop what we're superseding rather than orphaning it
 	m.outputRun++
 	m.aiRun++
+	m.outputKind = kind
 	m.outputTitle = title
 	m.outputLines = nil
 	m.outputOffset = 0
 	m.outputRunning = true
+	m.shellKilled = false
 	m.probing = false
+}
+
+// cancelledText names what a cancel just stopped. Scripts became cancellable in
+// the same change that added `!`, so this cannot assume the run was a shell one —
+// shellLoc is meaningless (or stale from an earlier `!`) for a script run.
+func (m Model) cancelledText() string {
+	if m.outputKind == outShell {
+		return m.shellLoc + ": cancelled"
+	}
+	return "cancelled " + m.outputTitle
+}
+
+// killRunning stops the command currently streaming into the Output pane, if
+// there is one. Safe to call at any time: cancel() is idempotent and harmless
+// after the process has already exited.
+func (m *Model) killRunning() {
+	if m.shellCancel == nil {
+		return
+	}
+	m.shellKilled = true
+	m.shellCancel()
+	m.shellCancel = nil
 }
 
 // startRepoProbe baselines every repo and arms the probe for the current
@@ -1648,7 +1831,7 @@ func (m *Model) runSelectedScript() tea.Cmd {
 	if m.scriptCursor < 0 || m.scriptCursor >= len(vs) {
 		return nil
 	}
-	m.takeOutputPane(vs[m.scriptCursor].Name) // supersede any previous producer
+	m.takeOutputPane(outScript, vs[m.scriptCursor].Name) // supersede any previous producer
 	m.focus = panelBottom
 	m.bottomView = bvOutput
 	// Arm the probe so the Repos pane follows what the script does as it goes,

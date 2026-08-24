@@ -120,7 +120,7 @@ func TestTUI_TakingTheOutputPaneStopsTheOldProbe(t *testing.T) {
 	}
 	oldRun := m.probeRun
 
-	m.takeOutputPane("something else")
+	m.takeOutputPane(outAI, "something else")
 
 	if m.probing && m.probeRun == oldRun {
 		t.Error("the superseded run's probe is still marked live")

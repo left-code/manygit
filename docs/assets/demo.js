@@ -351,6 +351,14 @@
     aiPrompting: false, aiPrompt: "", aiPending: null, aiGhost: false, aiGhostGen: 0,
     // In-memory only, like the Go: a reload starts with an empty history.
     aiHistory: [], aiHistIdx: 0, aiDraft: "",
+    // `!` shell mode. The demo's FIFTH intentional divergence: a browser has no
+    // shell, so a handful of commands answer from a script and everything else
+    // says so plainly. The page says the shell output is scripted, exactly as it
+    // says the git is fake. Everything around it is real and ported: the repo
+    // binding, the input, the history, the echoed command, the streaming into
+    // the Output pane, and esc to cancel.
+    shellPrompting: false, shellCmd: "", shellLoc: "", shellRunning: false,
+    shellHistory: [], shellHistIdx: 0, shellDraft: "",
     filterPanel: "repos", // repos | scripts | branches | prs
     filterAttention: false,
 
@@ -949,7 +957,9 @@
       var l = S.outputLines[i];
       // `done.` is tested before `skipped` — the summary line mentions skips and
       // would otherwise be coloured as one.
-      var cls = /^\$/.test(l) ? "a"
+      // `<repo> $ cmd` (a `!` run) accents like the bare `$ script.sh` a script
+      // run echoes — same rule, widened for the repo prefix.
+      var cls = /^(\S+\s)?\$\s/.test(l) ? "a"
         : /^==>/.test(l) ? "gp"
         : /^done\./.test(l) ? "gr"
         : /skipped|drifted|yes$/.test(l) ? "og"
@@ -986,7 +996,8 @@
   function bottomHint() {
     if (S.focus !== "bottom") return "";
     var h = "";
-    if (S.bottomView === "graph") h = "enter: its files";
+    if (S.bottomView === "output" && S.shellRunning) h = "ctrl+c: cancel";
+    else if (S.bottomView === "graph") h = "enter: its files";
     else if (S.bottomView === "changes" && S.changeShowDiff) h = "esc: back";
     else if (S.bottomView === "changes" && changeFiles.length) h = "enter: diff   esc: back";
     if (!h) return "";
@@ -1020,13 +1031,14 @@
     return line;
   }
   function statusOrFilter() {
+    if (S.shellPrompting) return shellPromptLine();
     if (S.aiPrompting) return aiPromptLine();
     if (S.filtering) return yl("/" + S.filter + "_");
     if (S.statusLine) return S.statusLine;
     var enter = "enter branches";
     if (S.focus === "scripts") enter = "enter run";
     else if (S.focus === "branches") enter = S.topView === "prs" ? "enter checkout PR" : "enter checkout";
-    return d(enter + " | z zoom | g graph | n news | t tags | F changed | s sync | p push | d/D discard | o open | r refetch | : ai | ? help | q quit");
+    return d(enter + " | z zoom | g graph | n news | t tags | F changed | s sync | p push | d/D discard | o open | r refetch | ! shell | : ai | ? help | q quit");
   }
   function indicators() {
     var harnessOK = HARNESSES.some(function (h) { return h.name === S.harness && h.installed; });
@@ -1171,6 +1183,7 @@
       kr("t", "toggle each repo's latest tag inline"),
       kr("F", "only changed / unsynced repos"),
       kr("/", "filter the focused list"),
+      kr("!", "shell ($) in the > repo — stays open, esc leaves"),
       kr("esc", "back out one layer of state"),
       "<div>&nbsp;</div>",
       "<div>" + gp("GitHub PRs (4)") + d("   (needs gh)") + "</div>",
@@ -1578,6 +1591,9 @@
     S.outputLines = [];
     S.outputOffset = 0;
     S.outputRunning = true;
+    // Port of the Go's killRunning() call here: a new producer means the old one
+    // is no longer running, so the "esc: cancel" hint must not linger onto it.
+    S.shellRunning = false;
   }
 
   function runScript() {
@@ -2047,7 +2063,119 @@
     }
   }
 
+  /* -- `!` shell mode (canned) --------------------------------------------
+     Port of internal/tui/update.go handleShellPromptKey + runShellLine. The ONE
+     thing that is faked is the command's output, because a browser has no bash
+     — the fifth intentional divergence, and the page says so on screen. The repo
+     binding, the input, the history, the echo, the streaming and esc are real. */
+
+  // The fixed part of the `!` prompt — the app naming itself, the way a shell
+  // prompt names the host before the path. Verbatim from view.go.
+  var SHELL_PROMPT_LEAD = "$manygit:";
+
+  function cannedShell(cmd, repo) {
+    var c = cmd.trim();
+    if (/^git\s+status/.test(c)) return ["## main...origin/main", " M internal/tui/update.go", "?? notes.txt"];
+    if (/^git\s+log/.test(c)) return ["a1b2c3d  wire the shell pane", "d4e5f6a  fix the tab bar"];
+    if (/^git\s+branch/.test(c)) return ["* main", "  feat/shell"];
+    if (/^ls(\s|$)/.test(c)) return ["README.md", "go.mod", "internal", "main.go"];
+    if (/^pwd$/.test(c)) return ["~/code/" + repo];
+    if (/^echo\s+/.test(c)) return [c.replace(/^echo\s+/, "")];
+    return null;
+  }
+
+  // shellLocation / trimLeftTo / shellLocBudget — ports of the Go helpers of the
+  // same names. "(root)" is a Repos-pane label, not a path segment.
+  function shellLocation(r) {
+    return !r.g || r.g === "(root)" ? r.n : r.g + "/" + r.n;
+  }
+  function trimLeftTo(s, max) {
+    if (max < 1) return "";
+    if (s.length <= max) return s;
+    if (max === 1) return "…";
+    return "…" + s.slice(s.length - (max - 1));
+  }
+  // The Go derives this from the terminal's column count, halving what is left
+  // after the right-hand indicators. This terminal is a CSS box that reflows, so
+  // there is no column count to halve — it uses the Go's upper cap, which is what
+  // a normal-width terminal lands on anyway. Every fixture path is well under it,
+  // so the demo shows the same untrimmed prompt a real 100-col terminal shows.
+  // trimLeftTo above is still the real logic, ported, and is what would fire.
+  function shellLocBudget() {
+    return 40;
+  }
+  function shellPromptLine() {
+    var loc = trimLeftTo(S.shellLoc, shellLocBudget());
+    return gp(SHELL_PROMPT_LEAD + loc) + " " + esc(S.shellCmd) + "_";
+  }
+
+  // Port of the Go's shellHistoryStep: clamped, no wraparound, and the draft is
+  // stashed on the way in so up-then-down is a round trip.
+  function shellHistoryStep(n) {
+    if (!S.shellHistory.length) return;
+    if (S.shellHistIdx === S.shellHistory.length) S.shellDraft = S.shellCmd;
+    var i = Math.min(Math.max(S.shellHistIdx + n, 0), S.shellHistory.length);
+    S.shellHistIdx = i;
+    S.shellCmd = i === S.shellHistory.length ? S.shellDraft : S.shellHistory[i];
+  }
+
+  function handleShellPromptKey(k) {
+    // esc leaves the shell and nothing else: a command already running keeps
+    // running. Focus lands on Repos (pane 1), like the Go.
+    if (k === "Escape") { S.shellPrompting = false; S.shellCmd = ""; S.focus = "repos"; return; }
+    if (k === "Enter") { runShellLine(); return; }
+    if (k === "Backspace") { S.shellCmd = S.shellCmd.slice(0, -1); return; }
+    if (k === "ArrowUp") { shellHistoryStep(-1); return; }
+    if (k === "ArrowDown") { shellHistoryStep(1); return; }
+    if (k.length === 1) S.shellCmd += k;
+  }
+
+  function runShellLine() {
+    var line = S.shellCmd.trim(), repo = S.shellLoc;
+    // The prompt STAYS OPEN: a shell you sit in, not a one-shot. Only esc leaves.
+    S.shellCmd = "";
+    if (!line) return;
+    if (!S.shellHistory.length || S.shellHistory[S.shellHistory.length - 1] !== line) {
+      S.shellHistory.push(line);
+    }
+    S.shellHistIdx = S.shellHistory.length;
+
+    var echo = repo + " $ " + line;
+    takeOutputPane(echo);
+    S.shellRunning = true;
+    S.focus = "bottom";
+    S.bottomView = "output";
+    var run = S.outputRun;
+    var body = cannedShell(line, repo);
+    // RAW strings, never HTML: renderOutput colours by regex on the raw line and
+    // escapes everything else, so markup pushed here would render literally.
+    var lines = [echo].concat(
+      body ? body : ["this demo has no shell — try git status, ls, pwd or echo"]
+    );
+    var i = 0;
+    var reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    (function step() {
+      if (run !== S.outputRun) return; // superseded
+      if (i >= lines.length) {
+        S.outputRunning = false;
+        S.shellRunning = false;
+        setStatus(body ? gr(repo + ": exited 0") : d(repo + ": nothing ran — the shell is faked here"));
+        render();
+        return;
+      }
+      var n = reduce ? lines.length : 1;
+      for (var j = 0; j < n && i < lines.length; j++, i++) {
+        var atBottom = S.outputOffset >= S.outputLines.length - 1;
+        S.outputLines.push(lines[i]);
+        if (atBottom) S.outputOffset = S.outputLines.length - 1;
+      }
+      render();
+      setTimeout(step, reduce ? 0 : 55);
+    })();
+  }
+
   function handleKey(k) {
+    if (S.shellPrompting) { handleShellPromptKey(k); return; }
     if (S.aiPrompting) { handleAIPromptKey(k); return; }
     if (S.confirmPlan) { handlePlanConfirm(k); return; }
     if (S.filtering) { handleFilterKey(k); return; }
@@ -2175,7 +2303,16 @@
         // filters are the outermost thing shaping what you're looking at.
         var escRepo = curRepo();
         var escPath = escRepo ? escRepo.path : "";
-        if (S.focus === "bottom" && S.bottomView === "changes" && S.changeShowDiff) {
+        if (S.shellRunning && !S.shellPrompting && S.focus === "bottom" && S.bottomView === "output") {
+          // Scoped to the Output pane, like the Go: esc's job everywhere else is
+          // to back out a layer, and killing a background command from inside a
+          // diff would be a nasty surprise.
+          S.outputRun++; // supersede the streaming timer
+          S.outputRunning = false;
+          S.shellRunning = false;
+          S.outputLines.push("— cancelled —"); // raw: renderOutput escapes markup
+          setStatus(og(S.shellLoc + ": cancelled"));
+        } else if (S.focus === "bottom" && S.bottomView === "changes" && S.changeShowDiff) {
           S.changeShowDiff = false;
         } else if (S.focus === "bottom" && S.bottomView === "changes") {
           S.bottomView = "graph";
@@ -2206,6 +2343,18 @@
         break;
       }
       case "F": S.filterAttention = !S.filterAttention; S.cursor = 0; loadContext(); break;
+      case "!": {
+        // `!` is the key (vim's shell-escape convention); what it opens renders as
+        // `<repo> $`, matching the `<repo> $ <cmd>` line the pane echoes back.
+        // Bound to the cursor repo up front and shown in the prompt, so there is
+        // never a question which folder the command lands in.
+        var sr = curRepo();
+        if (!sr) { setStatus(d("no repo selected")); break; }
+        S.shellPrompting = true; S.shellCmd = ""; S.shellLoc = shellLocation(sr);
+        S.shellHistIdx = S.shellHistory.length;
+        announce("Shell open in " + shellLocation(sr) + ". Type a command, enter runs it, esc leaves.");
+        break;
+      }
       case ":":
         // Global, not pane-scoped: the request names its own scope.
         S.aiPrompting = true; S.aiPrompt = ""; S.aiGhost = false;

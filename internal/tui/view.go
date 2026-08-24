@@ -456,6 +456,10 @@ func (m Model) bottomHint() string {
 	}
 	var h string
 	switch {
+	case m.bottomView == bvOutput && m.outputRunning && m.shellCancel != nil:
+		// ctrl+c, not esc: inside the shell esc leaves the mode and lets the
+		// command run on. ctrl+c stops it in both modes, so it is the honest hint.
+		h = "ctrl+c: cancel"
 	case m.bottomView == bvGraph:
 		h = "enter: its files" // WIP is always drillable, even with no commits
 	case m.bottomView == bvChanges && m.changeShowDiff:
@@ -819,10 +823,13 @@ func (m Model) footer() string {
 		}
 	}
 	return styleDim.Render(
-		enter + " | z zoom | g graph | n news | t tags | F changed | s sync | p push | d/D discard | o open | r refetch | : ai | ? help | q quit")
+		enter + " | z zoom | g graph | n news | t tags | F changed | s sync | p push | d/D discard | o open | r refetch | ! shell | : ai | ? help | q quit")
 }
 
 func (m Model) statusOrFilterLine() string {
+	if m.shellPrompting {
+		return m.shellPromptLine()
+	}
 	if m.aiPrompting {
 		return m.aiPromptLine()
 	}
@@ -833,6 +840,57 @@ func (m Model) statusOrFilterLine() string {
 		return m.statusLine
 	}
 	return m.footer()
+}
+
+// shellPromptLead is the fixed part of the `!` prompt — the app naming itself,
+// the way a shell prompt names the host before the path.
+const shellPromptLead = "$manygit:"
+
+// shellPromptLine renders the `!` input as a shell prompt: `$manygit:apps/api`.
+// The location is the whole point of the line — you can see which folder the
+// command will run in before you commit to running it — and it is the repo's
+// path relative to the scanned root, not an absolute one. The bottom bar shares
+// its width with the harness/github indicators, and a real absolute path would
+// leave almost nothing to type in at the documented 80-column minimum.
+func (m Model) shellPromptLine() string {
+	loc := trimLeftTo(m.shellLoc, shellLocBudget(m.width))
+	return styleGroup.Render(shellPromptLead+loc) + " " + m.shellCmd + "_"
+}
+
+// shellLocBudget is how many cells the location may occupy. It is derived from
+// the terminal width ALONE, deliberately not from what has been typed: a prompt
+// that resized under the cursor as you type would be far worse to read than a
+// slightly shortened path. Half of what is left after the right-hand indicators
+// and the lead, so the location can never crowd out the command.
+func shellLocBudget(width int) int {
+	if width <= 0 {
+		width = minTermW
+	}
+	n := (width - aiPromptReserve - len(shellPromptLead)) / 2
+	if n < 0 {
+		return 0
+	}
+	if n > 40 {
+		n = 40 // past this it is just noise; no path needs more to be recognisable
+	}
+	return n
+}
+
+// trimLeftTo shortens s from the LEFT to at most max cells, marking the cut with
+// a leading "…". The tail is what survives because in a path it is the part that
+// identifies you — "…/api-gateway" still says where you are, "apps/api…" does not.
+func trimLeftTo(s string, max int) string {
+	if max < 1 {
+		return ""
+	}
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	if max == 1 {
+		return "…"
+	}
+	return "…" + string(r[len(r)-(max-1):])
 }
 
 // aiPromptLine renders the `:` input: the harness's own name as the prompt, what
@@ -1210,6 +1268,7 @@ func (m Model) keysColumns() (leftCol, rightCol []string) {
 		kr("F", "only changed / unsynced repos"),
 		kr("/", "filter the focused list"),
 		kr(":", "AI git — @file, tab completes, up/down recalls"),
+		kr("!", "shell ($) in the > repo — stays open, esc leaves"),
 		kr("esc", "back out one layer of state"),
 		"",
 		styleGroup.Render("GitHub PRs (4)") + styleDim.Render("   (needs gh)"),

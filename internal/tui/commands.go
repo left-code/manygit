@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -114,26 +115,64 @@ func diffCmd(path, ref, file string) tea.Cmd {
 }
 
 // startScriptCmd runs a script with `bash` in the background (non-interactive),
-// merging stdout+stderr into one pipe and reading the first line. The process's
-// exit status is delivered to the reader via CloseWithError, so a non-zero exit
-// surfaces as scanner.Err() at EOF (no shared state, no race).
+// in the script's own directory.
 func startScriptCmd(path string, run int) tea.Cmd {
 	return func() tea.Msg {
-		c := exec.Command("bash", path)
+		ctx, cancel := context.WithCancel(context.Background())
+		c := exec.CommandContext(ctx, "bash", path)
 		c.Dir = filepath.Dir(path)
-		pr, pw := io.Pipe()
-		c.Stdout, c.Stderr = pw, pw
-		if err := c.Start(); err != nil {
-			return scriptOutMsg{run: run, done: true, err: err}
-		}
-		// Deliver the exit status to the reader: a non-zero exit surfaces as
-		// scanner.Err() at EOF. If the TUI quits mid-stream this goroutine is
-		// abandoned, but the child then gets SIGPIPE on its next write and exits.
-		go func() { pw.CloseWithError(c.Wait()) }()
-		sc := bufio.NewScanner(pr)
-		sc.Buffer(make([]byte, 0, 64*1024), 1<<20) // tolerate long lines (1 MiB)
-		return readScriptLine(sc, run)()
+		return streamCmd(c, cancel, run)
 	}
+}
+
+// startShellCmd runs one shell line (`!`) with `bash -c` in dir — the repo under
+// the cursor. Identical plumbing to a script run; the only difference is how the
+// command was built, which is why both go through streamCmd.
+func startShellCmd(line, dir string, run int) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithCancel(context.Background())
+		c := exec.CommandContext(ctx, "bash", "-c", line)
+		c.Dir = dir
+		return streamCmd(c, cancel, run)
+	}
+}
+
+// streamCmd starts c with stdout+stderr merged into one pipe and hands the
+// reader back to the Update loop. The process's exit status is delivered to the
+// reader via CloseWithError, so a non-zero exit surfaces as scanner.Err() at EOF
+// (no shared state, no race).
+//
+// It returns runStartMsg rather than the first line on purpose: reading would
+// block until the command printed something, and the cancel func has to be
+// reachable before then — otherwise `!sleep 30` could never be interrupted.
+func streamCmd(c *exec.Cmd, cancel context.CancelFunc, run int) tea.Msg {
+	setProcGroup(c)
+	pr, pw := io.Pipe()
+	c.Stdout, c.Stderr = pw, pw
+	if err := c.Start(); err != nil {
+		cancel()
+		return scriptOutMsg{run: run, done: true, err: err}
+	}
+	// Deliver the exit status to the reader: a non-zero exit surfaces as
+	// scanner.Err() at EOF. If the TUI quits mid-stream this goroutine is
+	// abandoned, but the child then gets SIGPIPE on its next write and exits.
+	go func() { pw.CloseWithError(c.Wait()) }()
+	sc := bufio.NewScanner(pr)
+	sc.Buffer(make([]byte, 0, 64*1024), 1<<20) // tolerate long lines (1 MiB)
+	return runStartMsg{run: run, cancel: cancel, scanner: sc}
+}
+
+// exitText names how a `!` run finished. A non-zero exit reads as the shell
+// would report it; anything else (could not start, pipe failure) shows the error.
+func exitText(err error) string {
+	if err == nil {
+		return "exited 0"
+	}
+	var ee *exec.ExitError
+	if errors.As(err, &ee) {
+		return "exited " + strconv.Itoa(ee.ExitCode())
+	}
+	return err.Error()
 }
 
 // readScriptLine reads the next line from a running script, re-issued after each

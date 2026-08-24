@@ -12,14 +12,18 @@ import (
 )
 
 // drainScript runs a start command to completion, mirroring the Update loop:
-// each scriptOutMsg drives the next read until done. Returns the captured lines
-// and the terminal error (script's non-zero exit or a read error; nil on clean exit).
+// runStartMsg opens the run, then each scriptOutMsg drives the next read until
+// done. Returns the captured lines and the terminal error (script's non-zero exit
+// or a read error; nil on clean exit).
 func drainScript(t *testing.T, first tea.Cmd) ([]string, error) {
 	t.Helper()
 	if first == nil {
 		t.Fatal("nil start command")
 	}
 	msg := first()
+	if st, ok := msg.(runStartMsg); ok {
+		msg = readScriptLine(st.scanner, st.run)()
+	}
 	var lines []string
 	for {
 		om, ok := msg.(scriptOutMsg)

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"bufio"
+	"context"
 
 	"github.com/rabeeh-ta/manygit/internal/discover"
 	"github.com/rabeeh-ta/manygit/internal/gh"
@@ -100,6 +101,17 @@ type checkoutDoneMsg struct {
 	path   string
 	branch string
 	err    error
+}
+
+// runStartMsg opens a streamed run — a script from the Scripts pane, or a `!`
+// shell line. It carries the kill switch back to the Model and is emitted the
+// moment the process STARTS, before the first read blocks: a command that prints
+// nothing for a minute (`!sleep 30`) must still be cancellable, so the cancel
+// func cannot ride on the first output line.
+type runStartMsg struct {
+	run     int // the run this belongs to (Model.outputRun at start)
+	cancel  context.CancelFunc
+	scanner *bufio.Scanner
 }
 
 // scriptOutMsg carries one live line of a running script's combined stdout+stderr.

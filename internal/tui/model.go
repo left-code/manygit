@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"strings"
 	"time"
 
@@ -47,6 +48,28 @@ const (
 	bvChanges                         // key 6
 	bvOutput                          // key 7
 	bottomViewCount                   // number of tabs in the bottom slot; `[` / `]` wrap on it
+)
+
+// shellLocation is where the `!` prompt says you are: the repo's path relative
+// to the scanned root. Group is "(root)" for a repo sitting directly in the
+// root, which is a label for the Repos pane rather than a path segment — a
+// prompt reading "$manygit:(root)/dotfiles" would be nonsense, so drop it.
+func shellLocation(r discover.Repo) string {
+	if r.Group == "" || r.Group == "(root)" {
+		return r.Name
+	}
+	return r.Group + "/" + r.Name
+}
+
+// outputKind is which producer currently owns the Output pane. The pane is
+// shared by three of them and they report completion differently: a script
+// "ran", a `!` line "exited N", the AI harness prints its own report.
+type outputKind int
+
+const (
+	outScript outputKind = iota
+	outShell
+	outAI
 )
 
 // repoVM is the per-repo view model.
@@ -116,7 +139,31 @@ type Model struct {
 	outputTitle   string
 	outputOffset  int
 	outputRunning bool
-	outputRun     int // bumped per run; stale msgs from a superseded run are dropped
+	outputRun     int        // bumped per run; stale msgs from a superseded run are dropped
+	outputKind    outputKind // which producer owns the pane; words the end-of-run report
+
+	// `!` shell mode. shellCmd is the line being typed; shellLoc/shellDir are
+	// the repo it will run in, SNAPSHOTTED when `!` opened — the same reasoning
+	// as aiNames: a background fetch or a rescan must not move the target out
+	// from under a half-typed command. shellLoc is the repo's path relative to
+	// the scanned root ("apps/api-gateway"), which is what the prompt shows.
+	//
+	// shellCancel is the running command's kill switch (nil when nothing runs),
+	// adopted from runStartMsg. shellKilled distinguishes "we stopped it" from a
+	// real non-zero exit, so a cancel isn't reported as a crash.
+	shellPrompting bool
+	shellCmd       string
+	shellLoc       string
+	shellDir       string
+	shellCancel    context.CancelFunc
+	shellKilled    bool
+
+	// Prompt history, up/down — in-memory only, exactly like aiHistory: a scratch
+	// convenience for this session, and shell lines are not worth persisting to
+	// disk by surprise. shellHistIdx == len(shellHistory) means "not browsing".
+	shellHistory []string
+	shellHistIdx int
+	shellDraft   string
 	// probing is true between a script starting and finishing, while the repo
 	// fingerprint probe is armed; probeRun is the outputRun the live chain is
 	// tagged with. Each tick re-arms itself, so two chains for the SAME run would

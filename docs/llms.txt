@@ -107,6 +107,19 @@ Actions apply to the repo under the `>` cursor.
   Reference a file with `@path` (tab-completes on the scripts it found) to send its
   contents along: `@scripts/update-all.sh only the frontend apps from this`. Referenced
   files must live inside the scanned tree.
+- `!` — shell in the highlighted repo. Opens a prompt reading `$manygit:apps/api-gateway`
+  (the key is `!`, vim's shell-escape convention; the prompt itself renders as a shell
+  prompt naming where you are — the repo's path relative to the scanned root, shortened
+  from the left with `…` on a narrow terminal). Type a bash command and it runs there,
+  with its
+  combined stdout and stderr streaming into the Output pane. The prompt stays open after
+  each command, so it is a shell you sit in rather than a one-shot. The bottom bar shows
+  the repo name while you type, so it is always clear which folder the command lands in.
+  `esc` leaves the shell and returns focus to the Repos pane; it does NOT stop a running
+  command — `ctrl+c` does that. `up`/`down` recall this session's earlier commands. No
+  confirm and no blocklist — it is a shell escape and runs exactly what you typed, with
+  the command echoed into the pane as the record. Non-interactive (no TTY), so `vim`,
+  `top` and `sudo` prompts do not work.
 - `o` / `z` — open the repo in your editor / zoom the focused pane
 - `tab` / `shift+tab` — cycle the panes
 - `[` / `]` — cycle the focused pane's tabs
@@ -160,8 +173,13 @@ Actions apply to the repo under the `>` cursor.
 
 manygit never writes to the folder you launch it from. On its own it never
 force-pushes, merges, or rebases: `s` is fetch + fast-forward-only pull, and `p`
-is a plain push. The only destructive action it offers directly is discarding a
+is a plain push. The only destructive action it offers on its own is discarding a
 repo's changes (`d` / `D`), which always asks first.
+
+`!` is the deliberate exception: it runs the bash command you type in the
+highlighted repo, with no confirm and no blocklist, because a shell escape that
+second-guessed you would be useless. The command is echoed into the Output pane
+with the repo it ran in, so there is a record, and `ctrl+c` stops it mid-run.
 
 `:` widens that, deliberately. It can merge, rebase, tag and push, because that
 is what it is for — but only commands it has shown you and you have confirmed,
