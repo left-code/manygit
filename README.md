@@ -46,7 +46,10 @@ skips that).
 
 A Homebrew install works differently: Homebrew owns that binary, so manygit never
 replaces it. It tells you a release is out — at most once a day, after you quit —
-and leaves `brew upgrade manygit` to you.
+and leaves `brew update && brew upgrade --cask manygit` to you. The
+`brew update` is load-bearing: a tap is a git clone that `brew upgrade` alone
+never pulls, so without it brew compares against a stale cask and tells you the
+latest version is already installed.
 
 To install a **specific version** — rolling back, or pinning a machine — pass the
 tag:

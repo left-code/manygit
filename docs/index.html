@@ -401,7 +401,8 @@
             <p>
               Homebrew owns the binary it installs, so manygit never replaces it. When a newer
               release lands it says so &mdash; at most once a day, after you quit &mdash; and
-              leaves <code>brew upgrade manygit</code> to you.
+              leaves <code>brew update &amp;&amp; brew upgrade --cask manygit</code> to you &mdash; the
+              update is what pulls the tap, without which brew still reads the old cask.
             </p>
 
             <h3>macOS and Linux &mdash; installer script</h3>

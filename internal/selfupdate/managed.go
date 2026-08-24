@@ -55,8 +55,19 @@ func ManagedBy(exePath, ldflagVersion, mainModuleVersion string) string {
 
 // upgradeCommands maps a managed install's owner to the command that upgrades it.
 // An owner absent from this map gets no update notice rather than a guess.
+//
+// The Homebrew entry leads with `brew update` for a reason that cost a user a
+// confused afternoon. manygit ships as a cask in a third-party tap, and a tap is
+// an ordinary git clone under Library/Taps — it is NOT part of the JSON API that
+// `brew upgrade` refreshes on its own (that covers homebrew-core and
+// homebrew-cask only). So a plain `brew upgrade manygit` compares the installed
+// version against whatever cask the clone happens to hold, which may be weeks
+// old, and prints "the latest version is already installed" — making manygit
+// look like it invented the release it had just correctly detected. Only
+// `brew update` pulls the tap. `--cask` is explicit so the token can never be
+// read as a formula.
 var upgradeCommands = map[string]string{
-	Homebrew:  "brew upgrade manygit",
+	Homebrew:  "brew update && brew upgrade --cask manygit",
 	GoInstall: "go install github.com/rabeeh-ta/manygit@latest",
 }
 

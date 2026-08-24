@@ -50,9 +50,13 @@ func TestUpdateNotice(t *testing.T) {
 		want      string
 	}{
 		{
-			name:      "homebrew names the brew command",
+			// `brew update` is not optional padding: a third-party tap is a git
+			// clone that `brew upgrade` alone never pulls, so without it the
+			// upgrade compares against a stale cask and reports "already
+			// installed" while a newer release sits in the tap.
+			name:      "homebrew refreshes the tap before upgrading",
 			managedBy: Homebrew,
-			want:      "manygit v1.2.0 is available (you have v1.1.3).\nRun: brew upgrade manygit",
+			want:      "manygit v1.2.0 is available (you have v1.1.3).\nRun: brew update && brew upgrade --cask manygit",
 		},
 		{
 			name:      "go install names the module path",
