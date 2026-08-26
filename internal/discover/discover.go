@@ -98,15 +98,16 @@ func Discover(root string, opts Options) ([]Repo, error) {
 	return repos, nil
 }
 
-// Script is a shell script discovered under the root.
+// Script is a runnable script discovered under the root.
 type Script struct {
 	Path string // absolute path
 	Name string // path relative to root, e.g. "scripts/sync-edx.sh"
 }
 
-// Scripts finds *.sh files under root up to maxDepth directory levels (a file
-// directly in root is depth 1, in root/scripts/ is depth 2), pruning the same
-// junk directories as Discover. Results are sorted by relative name.
+// Scripts finds runnable scripts under root up to maxDepth directory levels (a
+// file directly in root is depth 1, in root/scripts/ is depth 2), pruning the
+// same junk directories as Discover. Results are sorted by relative name. See
+// scriptExtensions for which files count.
 func Scripts(root string, maxDepth int, prune map[string]bool) []Script {
 	root = filepath.Clean(root)
 	if prune == nil {
@@ -146,16 +147,29 @@ func Scripts(root string, maxDepth int, prune map[string]bool) []Script {
 	return out
 }
 
-// looksLikeScript reports whether a file should be listed as a runnable script:
-// any *.sh, or an extensionless executable whose first bytes are a "#!" shebang
-// (catches helpers like scripts/sync-all without pulling in binaries or dotfiles).
+// scriptExtensions are the extensions that always count as a runnable script,
+// regardless of the executable bit: *.sh everywhere, plus the two native
+// Windows script kinds (*.ps1, *.cmd/*.bat) manygit's script runner also knows
+// how to invoke (see internal/tui commands.go's scriptInvocation).
+var scriptExtensions = []string{".sh", ".ps1", ".cmd", ".bat"}
+
+// looksLikeScript reports whether a file should be listed as a runnable
+// script: anything with a scriptExtensions suffix, or an extensionless
+// executable whose first bytes are a "#!" shebang (catches helpers like
+// scripts/sync-all without pulling in binaries or dotfiles).
 func looksLikeScript(name, full string, e os.DirEntry) bool {
-	if strings.HasSuffix(name, ".sh") {
-		return true
+	lower := strings.ToLower(name)
+	for _, ext := range scriptExtensions {
+		if strings.HasSuffix(lower, ext) {
+			return true
+		}
 	}
 	if strings.Contains(name, ".") {
 		return false
 	}
+	// Windows has no executable bit to check — Mode() there never sets any of
+	// 0o111 — so an extensionless shebang script is never picked up on it. That
+	// matches the platform: Windows can't run such a file directly either way.
 	info, err := e.Info()
 	if err != nil || info.Mode()&0o111 == 0 {
 		return false

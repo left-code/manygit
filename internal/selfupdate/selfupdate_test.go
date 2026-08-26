@@ -4,6 +4,8 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -49,6 +51,97 @@ func TestAssetName(t *testing.T) {
 	}
 	if got := assetName("linux", "amd64"); got != "manygit_linux_amd64.tar.gz" {
 		t.Errorf("assetName = %q", got)
+	}
+	if got := assetName("windows", "amd64"); got != "manygit_windows_amd64.tar.gz" {
+		t.Errorf("assetName = %q", got)
+	}
+}
+
+func TestBinaryNameFor(t *testing.T) {
+	if got := binaryNameFor("windows"); got != "manygit.exe" {
+		t.Errorf("binaryNameFor(windows) = %q, want manygit.exe", got)
+	}
+	for _, goos := range []string{"linux", "darwin"} {
+		if got := binaryNameFor(goos); got != "manygit" {
+			t.Errorf("binaryNameFor(%s) = %q, want manygit", goos, got)
+		}
+	}
+}
+
+func TestAggregate_SplitsByOSIncludingWindows(t *testing.T) {
+	rs := []Release{{
+		Tag:         "v1.0.0",
+		PublishedAt: "2026-01-01T00:00:00Z",
+		Assets: []Asset{
+			{Name: "manygit_linux_amd64.tar.gz", DownloadCount: 3},
+			{Name: "manygit_darwin_arm64.tar.gz", DownloadCount: 2},
+			{Name: "manygit_windows_amd64.tar.gz", DownloadCount: 5},
+			{Name: "checksums.txt", DownloadCount: 100}, // not a binary; excluded
+		},
+	}}
+	s := aggregate(rs, 10)
+	if s.BinaryDownloads != 10 {
+		t.Errorf("BinaryDownloads = %d, want 10", s.BinaryDownloads)
+	}
+	want := map[string]int{"linux": 3, "darwin": 2, "windows": 5}
+	for goos, n := range want {
+		if s.ByOS[goos] != n {
+			t.Errorf("ByOS[%s] = %d, want %d", goos, s.ByOS[goos], n)
+		}
+	}
+}
+
+// TestReplaceExecutableFor_Windows exercises the windows rename-aside sequence
+// on ordinary files (no locked-image behavior to simulate, but the sequencing
+// — old exe moved to .old, new binary takes its name — is plain os.Rename and
+// verifiable on any OS).
+func TestReplaceExecutableFor_Windows(t *testing.T) {
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "manygit.exe")
+	tmpName := filepath.Join(dir, ".manygit-new-abc")
+	if err := os.WriteFile(exe, []byte("old"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(tmpName, []byte("new"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := replaceExecutableFor(tmpName, exe, "windows"); err != nil {
+		t.Fatalf("replaceExecutableFor: %v", err)
+	}
+
+	got, err := os.ReadFile(exe)
+	if err != nil {
+		t.Fatalf("reading replaced exe: %v", err)
+	}
+	if string(got) != "new" {
+		t.Errorf("exe content = %q, want %q", got, "new")
+	}
+	if _, err := os.Stat(tmpName); !os.IsNotExist(err) {
+		t.Errorf("tmpName should have been consumed by the rename, stat err = %v", err)
+	}
+}
+
+func TestReplaceExecutableFor_Unix(t *testing.T) {
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "manygit")
+	tmpName := filepath.Join(dir, ".manygit-new-abc")
+	if err := os.WriteFile(exe, []byte("old"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(tmpName, []byte("new"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := replaceExecutableFor(tmpName, exe, "linux"); err != nil {
+		t.Fatalf("replaceExecutableFor: %v", err)
+	}
+	got, err := os.ReadFile(exe)
+	if err != nil {
+		t.Fatalf("reading replaced exe: %v", err)
+	}
+	if string(got) != "new" {
+		t.Errorf("exe content = %q, want %q", got, "new")
 	}
 }
 

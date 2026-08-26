@@ -44,6 +44,16 @@ you can run `manygit` from anywhere. On each launch it checks for a newer releas
 and offers to update itself (`--no-update-check`, or `MANYGIT_NO_UPDATE_CHECK=1`,
 skips that).
 
+**Windows — installer script:**
+
+```powershell
+irm https://raw.githubusercontent.com/rabeeh-ta/manygit/main/install.ps1 | iex
+```
+
+Drops `manygit.exe` into `%LocalAppData%\manygit\bin` and adds it to your PATH.
+Same self-update behavior as above. Already have bash — Git Bash, MSYS2, Cygwin
+or WSL? `install.sh` detects Windows there too and installs the same binary.
+
 A Homebrew install works differently: Homebrew owns that binary, so manygit never
 replaces it. It tells you a release is out — at most once a day, after you quit —
 and leaves `brew update && brew upgrade --cask manygit` to you. The
@@ -57,6 +67,8 @@ tag:
 ```bash
 curl -fsSL https://raw.githubusercontent.com/rabeeh-ta/manygit/main/install.sh | bash -s -- v1.0.7
 ```
+
+On Windows: `$env:MANYGIT_VERSION = "v1.0.7"; irm .../install.ps1 | iex`.
 
 The self-updater only ever moves *forward*, so a downgrade goes through the
 installer. Since the launch check will then offer to pull you back to the newest
@@ -118,7 +130,7 @@ Actions apply to the **highlighted** repo (the `>` cursor).
 | `F` | show only repos with changes / ahead / behind |
 | `/` | filter the focused list by what it shows — repos match on name **and** current branch (`/master` finds every repo on master, and the tag too while `t` is on); branches match on name (type `feat` to find a remote branch among hundreds); scripts on name |
 | `:` | **plain-English git** — type a request (`rebase current onto master`, `sync everything in other/`), your AI harness turns it into git commands, you confirm them, manygit runs them. Repo/folder/branch names autocomplete with `tab`, and `@script.sh` pulls a file in as context (`@scripts/update-all.sh only the frontend apps from this`). Output goes to the Output pane. `↑`/`↓` recall this session's earlier requests; `alt+backspace` / `ctrl+w` delete a word, `ctrl+u` the line |
-| `!` | **shell in the highlighted repo** — opens a `$manygit:<group>/<repo>` prompt naming the folder you're in; type a bash command and it runs there, streaming into the Output pane. The prompt **stays open**, so it's a shell you sit in: run, read, run again. The bottom bar shows which repo you're in while you type, so it's never ambiguous. `esc` leaves the shell and lands you back on Repos — it doesn't stop a running command; `ctrl+c` does that. `↑`/`↓` recall this session's earlier commands; `alt+backspace` / `ctrl+w` delete a word, `ctrl+u` the line. Non-interactive, so `vim`, `top` and anything else wanting a terminal won't work |
+| `!` | **shell in the highlighted repo** — opens a `$manygit:<group>/<repo>` prompt naming the folder you're in; type a bash command and it runs there (via `cmd.exe` on Windows if bash isn't on PATH), streaming into the Output pane. The prompt **stays open**, so it's a shell you sit in: run, read, run again. The bottom bar shows which repo you're in while you type, so it's never ambiguous. `esc` leaves the shell and lands you back on Repos — it doesn't stop a running command; `ctrl+c` does that. `↑`/`↓` recall this session's earlier commands; `alt+backspace` / `ctrl+w` delete a word, `ctrl+u` the line. Non-interactive, so `vim`, `top` and anything else wanting a terminal won't work |
 | `o` | open the repo in your editor |
 | `z` | zoom the focused pane |
 | `esc` | back out one layer of state: the diff, then Changes, then zoom, then the `/` and `F` filters |
@@ -200,9 +212,10 @@ is a plain push — and the only destructive thing it offers *on its own* is
 discarding a repo's changes (`d` / `D`), which always asks you to confirm first.
 
 `!` is the deliberate exception: it runs whatever bash command you type in the
-highlighted repo, with no confirm and no blocklist, because a shell escape that
-second-guessed you would be useless. What it does instead is leave a record — the
-command is echoed into the Output pane with the repo it ran in, before any output
+highlighted repo (falling back to `cmd.exe` on Windows if bash isn't on PATH),
+with no confirm and no blocklist, because a shell escape that second-guessed
+you would be useless. What it does instead is leave a record — the command is
+echoed into the Output pane with the repo it ran in, before any output
 arrives — and `ctrl+c` stops it mid-run.
 
 `:` deliberately widens that, since merging, rebasing and tagging are the point of

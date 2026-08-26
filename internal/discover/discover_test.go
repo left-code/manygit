@@ -134,6 +134,37 @@ func TestScripts_IncludesExtensionlessExecutables(t *testing.T) {
 	}
 }
 
+func TestScripts_IncludesWindowsScriptExtensions(t *testing.T) {
+	root := t.TempDir()
+	write := func(parts ...string) {
+		p := filepath.Join(append([]string{root}, parts...)...)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte("echo hi\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("scripts", "deploy.ps1")
+	write("scripts", "build.cmd")
+	write("scripts", "legacy.BAT") // extension match is case-insensitive
+	write("scripts", "notes.txt")  // not a script extension -> excluded
+
+	var names []string
+	for _, s := range Scripts(root, 2, DefaultPrune()) {
+		names = append(names, s.Name)
+	}
+	sort.Strings(names)
+	want := []string{
+		filepath.Join("scripts", "build.cmd"),
+		filepath.Join("scripts", "deploy.ps1"),
+		filepath.Join("scripts", "legacy.BAT"),
+	}
+	if !eq(names, want) {
+		t.Errorf("Scripts = %v, want %v", names, want)
+	}
+}
+
 func TestDiscover_GroupsByParent(t *testing.T) {
 	root := t.TempDir()
 	mkGitRepo(t, filepath.Join(root, "edx-dev", "blendxapi"))

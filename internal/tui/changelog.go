@@ -11,6 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/rabeeh-ta/manygit/internal/selfupdate"
+	"github.com/rabeeh-ta/manygit/internal/xdgdir"
 )
 
 // commitHashRe matches "* <hash> message", capturing the bullet so the hash can
@@ -39,15 +40,7 @@ func updatedFrom() string {
 // changelogSeenPath records the last from-version shown, so the screen appears
 // once per update even across restarts. Sits beside the news cache.
 func changelogSeenPath() string {
-	base := os.Getenv("XDG_CACHE_HOME")
-	if base == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return filepath.Join(".cache", "manygit", "changelog-seen")
-		}
-		base = filepath.Join(home, ".cache")
-	}
-	return filepath.Join(base, "manygit", "changelog-seen")
+	return filepath.Join(xdgdir.CacheHome(), "manygit", "changelog-seen")
 }
 
 func changelogSeen() string {

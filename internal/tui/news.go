@@ -15,6 +15,7 @@ import (
 
 	"github.com/rabeeh-ta/manygit/internal/git"
 	"github.com/rabeeh-ta/manygit/internal/harness"
+	"github.com/rabeeh-ta/manygit/internal/xdgdir"
 )
 
 const (
@@ -42,15 +43,7 @@ const newsFormat = 1
 // newsCachePath is the single cache file, under $XDG_CACHE_HOME/manygit (or
 // ~/.cache/manygit).
 func newsCachePath() string {
-	base := os.Getenv("XDG_CACHE_HOME")
-	if base == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return filepath.Join(".cache", "manygit", "news.json")
-		}
-		base = filepath.Join(home, ".cache")
-	}
-	return filepath.Join(base, "manygit", "news.json")
+	return filepath.Join(xdgdir.CacheHome(), "manygit", "news.json")
 }
 
 // loadNewsCache reads the news cache; ok=false when it's missing or unreadable.

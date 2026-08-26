@@ -6,10 +6,13 @@
 # pass it as an argument or in MANYGIT_VERSION:
 #   curl -fsSL .../install.sh | bash -s -- v1.0.7
 #   MANYGIT_VERSION=v1.0.7 ./install.sh
+#
+# On native Windows (no bash), use install.ps1 instead.
 set -euo pipefail
 
 repo="rabeeh-ta/manygit"
-bin="manygit"
+pkg="manygit"  # the asset name prefix goreleaser uses — never gains .exe
+exe="manygit"  # the installed executable's name — gains .exe on windows
 install_dir="${MANYGIT_INSTALL_DIR:-$HOME/.local/bin}"
 
 die() { printf 'error: %s\n' "$1" >&2; exit 1; }
@@ -21,7 +24,10 @@ os=$(uname -s)
 case "$os" in
   Linux)  os=linux ;;
   Darwin) os=darwin ;;
-  *) die "unsupported OS: $os (manygit supports Linux and macOS)" ;;
+  # Git Bash, MSYS2 and Cygwin all report one of these for `uname -s` on
+  # Windows. WSL reports Linux and needs nothing special.
+  MINGW*|MSYS*|CYGWIN*) os=windows; exe="manygit.exe" ;;
+  *) die "unsupported OS: $os (manygit supports Linux, macOS and Windows)" ;;
 esac
 
 arch=$(uname -m)
@@ -46,21 +52,21 @@ else
   [ -n "$tag" ] || die "no published release found for $repo yet"
 fi
 
-asset="${bin}_${os}_${arch}.tar.gz"
+asset="${pkg}_${os}_${arch}.tar.gz"
 url="https://github.com/$repo/releases/download/$tag/$asset"
 
-printf 'Installing %s %s (%s/%s)...\n' "$bin" "$tag" "$os" "$arch"
+printf 'Installing %s %s (%s/%s)...\n' "$exe" "$tag" "$os" "$arch"
 
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 curl -fsSL "$url" -o "$tmp/$asset" || die "download failed: $url"
 tar -xzf "$tmp/$asset" -C "$tmp"   || die "could not extract $asset"
-[ -f "$tmp/$bin" ] || die "archive did not contain $bin"
+[ -f "$tmp/$exe" ] || die "archive did not contain $exe"
 
 mkdir -p "$install_dir"
-mv "$tmp/$bin" "$install_dir/$bin"
-chmod +x "$install_dir/$bin"
-printf 'Installed to %s\n' "$install_dir/$bin"
+mv "$tmp/$exe" "$install_dir/$exe"
+chmod +x "$install_dir/$exe"
+printf 'Installed to %s\n' "$install_dir/$exe"
 
 # A pinned version is usually a rollback, and manygit's launch check would offer
 # to pull it straight back to newest. Say so instead of letting it surprise them.
@@ -81,4 +87,4 @@ case ":$PATH:" in
     ;;
 esac
 
-printf 'Done. Run: %s\n' "$bin"
+printf 'Done. Run: %s\n' "$exe"

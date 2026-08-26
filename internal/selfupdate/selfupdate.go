@@ -107,7 +107,7 @@ func Releases(ctx context.Context, n int) ([]Release, error) {
 type Stats struct {
 	TotalReleases   int            // every published release
 	BinaryDownloads int            // .tar.gz downloads (installs + self-updates), not checksums
-	ByOS            map[string]int // "linux" / "darwin" -> binary downloads
+	ByOS            map[string]int // "linux" / "darwin" / "windows" -> binary downloads
 	Recent          []ReleaseStat  // newest first, len <= the requested count
 }
 
@@ -146,6 +146,8 @@ func aggregate(rs []Release, recent int) Stats {
 				s.ByOS["darwin"] += a.DownloadCount
 			case strings.Contains(a.Name, "linux"):
 				s.ByOS["linux"] += a.DownloadCount
+			case strings.Contains(a.Name, "windows"):
+				s.ByOS["windows"] += a.DownloadCount
 			}
 		}
 		if i < recent {
@@ -198,9 +200,24 @@ func allReleases(ctx context.Context) ([]Release, error) {
 }
 
 // assetName is the archive name goreleaser produces for an os/arch pair, e.g.
-// "manygit_darwin_arm64.tar.gz".
+// "manygit_darwin_arm64.tar.gz". Every OS ships the same .tar.gz format —
+// Windows 10 1803+ and Windows 11 both include tar.exe, so there's no need for
+// a second archive format just for one platform.
 func assetName(goos, goarch string) string {
 	return fmt.Sprintf("manygit_%s_%s.tar.gz", goos, goarch)
+}
+
+// binaryName is the executable's name inside the archive: goreleaser appends
+// .exe for a windows build, nothing otherwise.
+func binaryName() string {
+	return binaryNameFor(runtime.GOOS)
+}
+
+func binaryNameFor(goos string) string {
+	if goos == "windows" {
+		return "manygit.exe"
+	}
+	return "manygit"
 }
 
 // Apply downloads this platform's binary from r, verifies it against the
@@ -239,7 +256,7 @@ func Apply(ctx context.Context, r Release) error {
 		}
 	}
 
-	bin, err := extractBinary(tarData, "manygit")
+	bin, err := extractBinary(tarData, binaryName())
 	if err != nil {
 		return err
 	}
@@ -266,15 +283,61 @@ func Apply(ctx context.Context, r Release) error {
 		os.Remove(tmpName)
 		return err
 	}
-	if err := os.Chmod(tmpName, 0o755); err != nil {
+	if runtime.GOOS != "windows" { // chmod bits are meaningless there
+		if err := os.Chmod(tmpName, 0o755); err != nil {
+			os.Remove(tmpName)
+			return err
+		}
+	}
+	return replaceExecutable(tmpName, exe)
+}
+
+// replaceExecutable puts tmpName — the newly downloaded binary — at exe, the
+// currently-running executable's path.
+//
+// On Unix this is one atomic rename over exe: the running process keeps its
+// already-open inode, so the old bytes stay readable until it exits. Windows
+// has no equivalent — the loader locks the image file for writing, though
+// (since Vista) it opens it with FILE_SHARE_DELETE, which still permits a
+// rename. So exe is moved aside to exe+".old" first and tmpName takes its
+// place; the ".old" file is almost always still locked by this very process,
+// so removing it is best-effort here and retried on the next launch (see
+// CleanupStale, called from main at startup).
+func replaceExecutable(tmpName, exe string) error {
+	return replaceExecutableFor(tmpName, exe, runtime.GOOS)
+}
+
+func replaceExecutableFor(tmpName, exe, goos string) error {
+	if goos != "windows" {
+		if err := os.Rename(tmpName, exe); err != nil {
+			os.Remove(tmpName)
+			return err
+		}
+		return nil
+	}
+	old := exe + ".old"
+	os.Remove(old) // a leftover from an earlier update, if any
+	if err := os.Rename(exe, old); err != nil {
 		os.Remove(tmpName)
 		return err
 	}
 	if err := os.Rename(tmpName, exe); err != nil {
-		os.Remove(tmpName)
+		os.Rename(old, exe) // best-effort restore
 		return err
 	}
+	os.Remove(old) // usually still locked while this process is running
 	return nil
+}
+
+// CleanupStale removes a stray "<exe>.old" left behind by replaceExecutable on
+// Windows (see above) — a no-op once that file no longer exists, and a no-op
+// on every other OS, which never creates one.
+func CleanupStale() {
+	exe, err := os.Executable()
+	if err != nil {
+		return
+	}
+	_ = os.Remove(exe + ".old")
 }
 
 func download(ctx context.Context, url string) ([]byte, error) {

@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"runtime/debug"
 	"strings"
-	"syscall"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -47,6 +46,12 @@ Flags:
 		fmt.Fprint(w, "\nMore: https://github.com/rabeeh-ta/manygit\n")
 	}
 	flag.Parse()
+
+	// Windows can't overwrite its own running executable, so a self-update there
+	// leaves the replaced binary behind as "<exe>.old" (see selfupdate.Apply).
+	// The lock on it clears once that old process exits, so pick it up now, on
+	// the next launch. A no-op everywhere else: nothing ever creates this file.
+	selfupdate.CleanupStale()
 
 	// GoReleaser stamps the version into the ldflag; `go install` leaves it at the
 	// source default and puts the version in build info. Resolve before any read.
@@ -199,7 +204,7 @@ func maybeSelfUpdate(current string) string {
 		// internal/tui changelog handling. current is the OLD version (this
 		// process was built before the update).
 		env := append(os.Environ(), tui.EnvUpdatedFrom+"="+current)
-		err = syscall.Exec(exe, os.Args, env)
+		err = relaunch(exe, os.Args, env)
 	}
 	if err != nil {
 		fmt.Println("Please restart manygit to use the new version.")
@@ -220,8 +225,8 @@ func printStats() {
 	}
 	fmt.Printf("manygit — public download stats\n\n")
 	fmt.Printf("  total releases       %d\n", s.TotalReleases)
-	fmt.Printf("  all-time downloads   %d   (linux %d · darwin %d)\n\n",
-		s.BinaryDownloads, s.ByOS["linux"], s.ByOS["darwin"])
+	fmt.Printf("  all-time downloads   %d   (linux %d · darwin %d · windows %d)\n\n",
+		s.BinaryDownloads, s.ByOS["linux"], s.ByOS["darwin"], s.ByOS["windows"])
 	fmt.Printf("  last %d releases\n", len(s.Recent))
 	for _, r := range s.Recent {
 		fmt.Printf("    %-9s %s   %5d\n", r.Tag, r.Date, r.Downloads)

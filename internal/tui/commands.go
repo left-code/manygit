@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -114,27 +115,66 @@ func diffCmd(path, ref, file string) tea.Cmd {
 	}
 }
 
-// startScriptCmd runs a script with `bash` in the background (non-interactive),
-// in the script's own directory.
+// startScriptCmd runs a discovered script in the background (non-interactive),
+// in the script's own directory, with the interpreter its extension calls for.
 func startScriptCmd(path string, run int) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithCancel(context.Background())
-		c := exec.CommandContext(ctx, "bash", path)
+		prog, args := scriptInvocation(path)
+		c := exec.CommandContext(ctx, prog, args...)
 		c.Dir = filepath.Dir(path)
 		return streamCmd(c, cancel, run)
 	}
 }
 
-// startShellCmd runs one shell line (`!`) with `bash -c` in dir — the repo under
-// the cursor. Identical plumbing to a script run; the only difference is how the
-// command was built, which is why both go through streamCmd.
+// scriptInvocation resolves the interpreter for a discover.Scripts result by
+// extension: bash for *.sh (every platform manygit has ever shipped on),
+// PowerShell for *.ps1, and cmd.exe for *.cmd/*.bat — the native Windows script
+// kinds discover.looksLikeScript also picks up.
+func scriptInvocation(path string) (prog string, args []string) {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".ps1":
+		return "powershell", []string{"-NoProfile", "-ExecutionPolicy", "Bypass", "-File", path}
+	case ".cmd", ".bat":
+		return "cmd", []string{"/C", path}
+	default:
+		return "bash", []string{path}
+	}
+}
+
+// startShellCmd runs one shell line (`!`) in dir — the repo under the cursor.
+// Identical plumbing to a script run; the only difference is how the command
+// was built, which is why both go through streamCmd.
 func startShellCmd(line, dir string, run int) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithCancel(context.Background())
-		c := exec.CommandContext(ctx, "bash", "-c", line)
+		prog, args := shellInvocation(line)
+		c := exec.CommandContext(ctx, prog, args...)
 		c.Dir = dir
 		return streamCmd(c, cancel, run)
 	}
+}
+
+// shellInvocation resolves how to run one `!` line: bash -c when bash is on
+// PATH — what the docs describe, and what Git for Windows bundles — else
+// cmd.exe's /C on Windows, which has no bash of its own. Off Windows, bash not
+// being on PATH is left as exec's own "not found" error, same as before this
+// existed.
+func shellInvocation(line string) (prog string, args []string) {
+	_, err := exec.LookPath("bash")
+	return shellInvocationFor(line, err == nil, runtime.GOOS)
+}
+
+// shellInvocationFor is shellInvocation's pure decision, split out so the
+// PATH lookup and the GOOS check can be supplied directly in tests.
+func shellInvocationFor(line string, haveBash bool, goos string) (prog string, args []string) {
+	if haveBash {
+		return "bash", []string{"-c", line}
+	}
+	if goos == "windows" {
+		return "cmd", []string{"/C", line}
+	}
+	return "bash", []string{"-c", line}
 }
 
 // streamCmd starts c with stdout+stderr merged into one pipe and hands the
@@ -153,6 +193,7 @@ func streamCmd(c *exec.Cmd, cancel context.CancelFunc, run int) tea.Msg {
 		cancel()
 		return scriptOutMsg{run: run, done: true, err: err}
 	}
+	finishProcGroup(c)
 	// Deliver the exit status to the reader: a non-zero exit surfaces as
 	// scanner.Err() at EOF. If the TUI quits mid-stream this goroutine is
 	// abandoned, but the child then gets SIGPIPE on its next write and exits.
