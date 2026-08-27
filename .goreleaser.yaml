@@ -56,6 +56,10 @@ homebrew_casks:
   - name: manygit
     binaries:
       - manygit
+    # Forks/CI runs without TAP_GITHUB_TOKEN (e.g. a contributor's fork
+    # cutting a test release) can't push to rabeeh-ta's tap — skip rather
+    # than fail the whole release for it.
+    skip_upload: '{{ if envOrDefault "TAP_GITHUB_TOKEN" "" }}false{{ else }}true{{ end }}'
     repository:
       owner: rabeeh-ta
       name: homebrew-manygit
@@ -114,7 +118,9 @@ changelog:
       - Merge pull request
       - Merge branch
 
-release:
-  github:
-    owner: rabeeh-ta
-    name: manygit
+# No owner/name here on purpose: goreleaser infers the release repo from the
+# checked-out `origin` remote when they're unset (internal/git.ExtractRepoFromConfig).
+# A fork cutting its own test release then publishes to itself instead of
+# 403ing against rabeeh-ta/manygit, and the canonical repo still resolves
+# correctly when this config runs there.
+release: {}
