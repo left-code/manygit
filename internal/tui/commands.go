@@ -193,11 +193,18 @@ func streamCmd(c *exec.Cmd, cancel context.CancelFunc, run int) tea.Msg {
 		cancel()
 		return scriptOutMsg{run: run, done: true, err: err}
 	}
-	finishProcGroup(c)
+	releaseProcGroup := finishProcGroup(c)
 	// Deliver the exit status to the reader: a non-zero exit surfaces as
 	// scanner.Err() at EOF. If the TUI quits mid-stream this goroutine is
 	// abandoned, but the child then gets SIGPIPE on its next write and exits.
-	go func() { pw.CloseWithError(c.Wait()) }()
+	// releaseProcGroup runs here too (not just on cancel) so a command that
+	// simply finishes on its own still releases the Windows Job Object handle
+	// finishProcGroup opened for it — see procgroup_windows.go.
+	go func() {
+		err := c.Wait()
+		releaseProcGroup()
+		pw.CloseWithError(err)
+	}()
 	sc := bufio.NewScanner(pr)
 	sc.Buffer(make([]byte, 0, 64*1024), 1<<20) // tolerate long lines (1 MiB)
 	return runStartMsg{run: run, cancel: cancel, scanner: sc}

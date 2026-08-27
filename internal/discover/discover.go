@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 )
@@ -107,12 +108,13 @@ type Script struct {
 // Scripts finds runnable scripts under root up to maxDepth directory levels (a
 // file directly in root is depth 1, in root/scripts/ is depth 2), pruning the
 // same junk directories as Discover. Results are sorted by relative name. See
-// scriptExtensions for which files count.
+// scriptExtensionsFor for which files count.
 func Scripts(root string, maxDepth int, prune map[string]bool) []Script {
 	root = filepath.Clean(root)
 	if prune == nil {
 		prune = DefaultPrune()
 	}
+	exts := scriptExtensionsFor(runtime.GOOS)
 	var out []Script
 	var walk func(dir string, depth int)
 	walk = func(dir string, depth int) {
@@ -132,7 +134,7 @@ func Scripts(root string, maxDepth int, prune map[string]bool) []Script {
 				continue
 			}
 			full := filepath.Join(dir, name)
-			if !looksLikeScript(name, full, e) {
+			if !looksLikeScript(name, full, e, exts) {
 				continue
 			}
 			rel, err := filepath.Rel(root, full)
@@ -147,19 +149,27 @@ func Scripts(root string, maxDepth int, prune map[string]bool) []Script {
 	return out
 }
 
-// scriptExtensions are the extensions that always count as a runnable script,
-// regardless of the executable bit: *.sh everywhere, plus the two native
-// Windows script kinds (*.ps1, *.cmd/*.bat) manygit's script runner also knows
-// how to invoke (see internal/tui commands.go's scriptInvocation).
-var scriptExtensions = []string{".sh", ".ps1", ".cmd", ".bat"}
+// scriptExtensionsFor returns the extensions that always count as a runnable
+// script, regardless of the executable bit: *.sh everywhere, plus — only on
+// Windows — the two native Windows script kinds (*.ps1, *.cmd/*.bat).
+// internal/tui commands.go's scriptInvocation is the only thing that knows how
+// to run those, and it only has powershell/cmd.exe to invoke on Windows; on
+// Linux/macOS neither exists on PATH, so listing them there would offer
+// scripts the runner can't actually start.
+func scriptExtensionsFor(goos string) []string {
+	if goos == "windows" {
+		return []string{".sh", ".ps1", ".cmd", ".bat"}
+	}
+	return []string{".sh"}
+}
 
 // looksLikeScript reports whether a file should be listed as a runnable
-// script: anything with a scriptExtensions suffix, or an extensionless
-// executable whose first bytes are a "#!" shebang (catches helpers like
-// scripts/sync-all without pulling in binaries or dotfiles).
-func looksLikeScript(name, full string, e os.DirEntry) bool {
+// script: anything with an exts suffix, or an extensionless executable whose
+// first bytes are a "#!" shebang (catches helpers like scripts/sync-all
+// without pulling in binaries or dotfiles).
+func looksLikeScript(name, full string, e os.DirEntry, exts []string) bool {
 	lower := strings.ToLower(name)
-	for _, ext := range scriptExtensions {
+	for _, ext := range exts {
 		if strings.HasSuffix(lower, ext) {
 			return true
 		}

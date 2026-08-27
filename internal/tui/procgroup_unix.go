@@ -25,5 +25,6 @@ func setProcGroup(c *exec.Cmd) {
 // before Start, and unix process groups pick up every descendant automatically
 // (they inherit their parent's pgid), so there's nothing left to attach once
 // the process exists. See procgroup_windows.go, which needs the process handle
-// Start produces and so can't do its equivalent setup any earlier.
-func finishProcGroup(c *exec.Cmd) {}
+// Start produces and so can't do its equivalent setup any earlier, and so
+// returns a cleanup func of its own to release it.
+func finishProcGroup(c *exec.Cmd) func() { return func() {} }

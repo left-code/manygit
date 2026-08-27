@@ -4,6 +4,7 @@ package tui
 
 import (
 	"os/exec"
+	"sync"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -25,13 +26,20 @@ func setProcGroup(c *exec.Cmd) {}
 // it. A child inherits its parent's job automatically at the moment it's
 // created, so assigning the top-level process right after Start still catches
 // every descendant it goes on to spawn.
-func finishProcGroup(c *exec.Cmd) {
+//
+// The returned func releases the job handle and must be called once the
+// process is done, cancelled or not — c.Cancel only fires on cancellation, so
+// a command that simply runs to completion would otherwise never close this
+// handle. Both paths funnel through the same sync.Once, so whichever happens
+// first (normal exit or cancel) is the only one that actually closes it.
+func finishProcGroup(c *exec.Cmd) func() {
+	noop := func() {}
 	if c.Process == nil {
-		return
+		return noop
 	}
 	job, err := windows.CreateJobObject(nil, nil)
 	if err != nil {
-		return
+		return noop
 	}
 	info := windows.JOBOBJECT_EXTENDED_LIMIT_INFORMATION{
 		BasicLimitInformation: windows.JOBOBJECT_BASIC_LIMIT_INFORMATION{
@@ -43,19 +51,23 @@ func finishProcGroup(c *exec.Cmd) {
 		uintptr(unsafe.Pointer(&info)), uint32(unsafe.Sizeof(info)),
 	); err != nil {
 		windows.CloseHandle(job)
-		return
+		return noop
 	}
 	h, err := windows.OpenProcess(windows.PROCESS_SET_QUOTA|windows.PROCESS_TERMINATE, false, uint32(c.Process.Pid))
 	if err != nil {
 		windows.CloseHandle(job)
-		return
+		return noop
 	}
 	defer windows.CloseHandle(h)
 	if err := windows.AssignProcessToJobObject(job, h); err != nil {
 		windows.CloseHandle(job)
-		return
+		return noop
 	}
+	var once sync.Once
+	closeJob := func() { once.Do(func() { windows.CloseHandle(job) }) }
 	c.Cancel = func() error {
-		return windows.CloseHandle(job) // KILL_ON_JOB_CLOSE terminates the whole tree
+		closeJob() // KILL_ON_JOB_CLOSE terminates the whole tree
+		return nil
 	}
+	return closeJob
 }

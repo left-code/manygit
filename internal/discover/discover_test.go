@@ -3,6 +3,7 @@ package discover
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"testing"
 )
@@ -134,7 +135,26 @@ func TestScripts_IncludesExtensionlessExecutables(t *testing.T) {
 	}
 }
 
-func TestScripts_IncludesWindowsScriptExtensions(t *testing.T) {
+func TestScriptExtensionsFor(t *testing.T) {
+	want := []string{".sh", ".ps1", ".cmd", ".bat"}
+	if got := scriptExtensionsFor("windows"); !eq(got, want) {
+		t.Errorf("scriptExtensionsFor(windows) = %v, want %v", got, want)
+	}
+	for _, goos := range []string{"linux", "darwin"} {
+		if got := scriptExtensionsFor(goos); !eq(got, []string{".sh"}) {
+			t.Errorf("scriptExtensionsFor(%s) = %v, want [.sh]", goos, got)
+		}
+	}
+}
+
+// TestScripts_WindowsExtensionsExcludedOffWindows locks in that *.ps1/*.cmd/
+// *.bat only ever surface as runnable scripts on Windows: scriptInvocation has
+// no powershell/cmd.exe to invoke them with anywhere else, so listing them
+// there would offer scripts the runner can't start.
+func TestScripts_WindowsExtensionsExcludedOffWindows(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("asserts the off-Windows exclusion; see TestScriptExtensionsFor for the Windows list")
+	}
 	root := t.TempDir()
 	write := func(parts ...string) {
 		p := filepath.Join(append([]string{root}, parts...)...)
@@ -147,19 +167,14 @@ func TestScripts_IncludesWindowsScriptExtensions(t *testing.T) {
 	}
 	write("scripts", "deploy.ps1")
 	write("scripts", "build.cmd")
-	write("scripts", "legacy.BAT") // extension match is case-insensitive
-	write("scripts", "notes.txt")  // not a script extension -> excluded
+	write("scripts", "legacy.BAT")
+	write("scripts", "real.sh")
 
 	var names []string
 	for _, s := range Scripts(root, 2, DefaultPrune()) {
 		names = append(names, s.Name)
 	}
-	sort.Strings(names)
-	want := []string{
-		filepath.Join("scripts", "build.cmd"),
-		filepath.Join("scripts", "deploy.ps1"),
-		filepath.Join("scripts", "legacy.BAT"),
-	}
+	want := []string{filepath.Join("scripts", "real.sh")}
 	if !eq(names, want) {
 		t.Errorf("Scripts = %v, want %v", names, want)
 	}
