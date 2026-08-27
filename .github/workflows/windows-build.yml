@@ -1,0 +1,28 @@
+# Ad-hoc Windows build for local testing. Not a release — no tag needed,
+# nothing gets published. Download the binary from the run's Artifacts.
+name: windows-build
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "**"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+      - name: Build
+        env:
+          GOOS: windows
+          GOARCH: amd64
+          CGO_ENABLED: 0
+        run: go build -o manygit.exe .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: manygit-windows-amd64
+          path: manygit.exe
