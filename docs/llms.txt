@@ -6,8 +6,9 @@
 > then fetches, pulls, pushes, and switches branches on the one under the cursor,
 > without cd-ing between them.
 
-manygit is a single Go binary for macOS and Linux, built with Bubble Tea and
-Lip Gloss. It is free and open source at https://github.com/rabeeh-ta/manygit
+manygit is a single Go binary for macOS, Linux and Windows, built with Bubble
+Tea and Lip Gloss. It is free and open source at
+https://github.com/rabeeh-ta/manygit
 
 ## What problem it solves
 
@@ -53,6 +54,13 @@ macOS and Linux, via the installer script:
 
     curl -fsSL https://raw.githubusercontent.com/rabeeh-ta/manygit/main/install.sh | bash
 
+Windows, via PowerShell:
+
+    irm https://raw.githubusercontent.com/rabeeh-ta/manygit/main/install.ps1 | iex
+
+(Git Bash, MSYS2, Cygwin and WSL can use install.sh instead — it detects Windows
+there too and installs the same binary.)
+
 The installer-script build self-updates: it offers to replace itself when a newer
 release exists. A Homebrew or `go install` build is owned by that package manager,
 so manygit never replaces it — it reports the new release at most once a day, after
@@ -78,7 +86,8 @@ It walks the folder three levels deep by default, skips `node_modules`, `vendor`
 ## Panes
 
 - `1` Repos — every repo, its current branch, and its status
-- `2` Scripts — `*.sh` files near the root, runnable in place
+- `2` Scripts — script files near the root, runnable in place (`*.sh`
+  everywhere; `*.ps1`, `*.cmd`, `*.bat` also count on Windows)
 - `3` Branches — the highlighted repo's local and remote branches
 - `4` PRs — GitHub pull requests (needs the `gh` CLI, signed in)
 - `5` Graph — a colored commit graph for the highlighted repo
@@ -110,8 +119,8 @@ Actions apply to the repo under the `>` cursor.
 - `!` — shell in the highlighted repo. Opens a prompt reading `$manygit:apps/api-gateway`
   (the key is `!`, vim's shell-escape convention; the prompt itself renders as a shell
   prompt naming where you are — the repo's path relative to the scanned root, shortened
-  from the left with `…` on a narrow terminal). Type a bash command and it runs there,
-  with its
+  from the left with `…` on a narrow terminal). Type a bash command and it runs there
+  (falling back to `cmd.exe` on Windows if bash isn't on PATH), with its
   combined stdout and stderr streaming into the Output pane. The prompt stays open after
   each command, so it is a shell you sit in rather than a one-shot. The bottom bar shows
   the repo name while you type, so it is always clear which folder the command lands in.
@@ -177,9 +186,10 @@ is a plain push. The only destructive action it offers on its own is discarding 
 repo's changes (`d` / `D`), which always asks first.
 
 `!` is the deliberate exception: it runs the bash command you type in the
-highlighted repo, with no confirm and no blocklist, because a shell escape that
-second-guessed you would be useless. The command is echoed into the Output pane
-with the repo it ran in, so there is a record, and `ctrl+c` stops it mid-run.
+highlighted repo (falling back to `cmd.exe` on Windows if bash isn't on PATH),
+with no confirm and no blocklist, because a shell escape that second-guessed
+you would be useless. The command is echoed into the Output pane with the repo
+it ran in, so there is a record, and `ctrl+c` stops it mid-run.
 
 `:` widens that, deliberately. It can merge, rebase, tag and push, because that
 is what it is for — but only commands it has shown you and you have confirmed,

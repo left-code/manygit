@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/rabeeh-ta/manygit/internal/xdgdir"
 )
 
 // Owners a managed install can report. SelfManaged means manygit owns its own
@@ -118,15 +120,7 @@ func ResolveVersion(ldflagVersion, buildInfoVersion string) string {
 // noticeMarkerPath records when the last update notice was shown. It sits beside
 // the changelog marker in the cache dir, and holds an RFC3339 timestamp.
 func noticeMarkerPath() string {
-	base := os.Getenv("XDG_CACHE_HOME")
-	if base == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return filepath.Join(".cache", "manygit", "notified-at")
-		}
-		base = filepath.Join(home, ".cache")
-	}
-	return filepath.Join(base, "manygit", "notified-at")
+	return filepath.Join(xdgdir.CacheHome(), "manygit", "notified-at")
 }
 
 // LastNotified reads when the last update notice was shown. A missing or

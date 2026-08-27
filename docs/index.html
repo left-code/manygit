@@ -59,7 +59,7 @@
         "name": "manygit",
         "applicationCategory": "DeveloperApplication",
         "applicationSubCategory": "Version Control",
-        "operatingSystem": "macOS, Linux",
+        "operatingSystem": "macOS, Linux, Windows",
         "url": "https://rabeeh-ta.github.io/manygit/",
         "downloadUrl": "https://github.com/rabeeh-ta/manygit/releases",
         "codeRepository": "https://github.com/rabeeh-ta/manygit",
@@ -103,7 +103,7 @@
             "name": "Is there a CLI tool to manage multiple git repositories at once?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "manygit is one. You point it at a folder, it finds every git repo nested up to three levels underneath, and puts them all on a single screen with each repo's branch and whether it is ahead, behind, or dirty. You then fetch, pull, push, or switch branches on the repo under the cursor without cd-ing between them. It is a free single binary for macOS and Linux."
+              "text": "manygit is one. You point it at a folder, it finds every git repo nested up to three levels underneath, and puts them all on a single screen with each repo's branch and whether it is ahead, behind, or dirty. You then fetch, pull, push, or switch branches on the repo under the cursor without cd-ing between them. It is a free single binary for macOS, Linux, and Windows."
             }
           },
           {
@@ -262,7 +262,7 @@
         <div class="shell hero__grid">
           <div class="lane">
             <div>single binary</div>
-            <div>macOS · Linux</div>
+            <div>macOS · Linux · Windows</div>
           </div>
           <div>
             <h1>Which of your repos are <em>dirty</em> right now?</h1>
@@ -296,7 +296,7 @@
                   copy
                 </button>
               </div>
-              <a class="chip" href="#install">Linux and other ways to install</a>
+              <a class="chip" href="#install">Linux, Windows, and other ways to install</a>
             </div>
           </div>
         </div>
@@ -427,6 +427,30 @@
               <code>~/.local/bin</code> to your PATH if it isn't there already. This binary is
               yours rather than a package manager's, so manygit checks for a newer release on
               every launch and offers to update itself &mdash; the last time you'll run this.
+            </p>
+
+            <h3>Windows &mdash; installer script</h3>
+            <div class="cmd">
+              <div class="cmd__txt" tabindex="0" role="group" aria-label="command, scrolls horizontally">
+                <span class="cmd__sigil">$</span
+                >irm https://raw.githubusercontent.com/rabeeh-ta/manygit/main/install.ps1 | iex
+              </div>
+              <button
+                class="cmd__copy"
+                type="button"
+                data-copy="irm https://raw.githubusercontent.com/rabeeh-ta/manygit/main/install.ps1 | iex"
+                  aria-label="copy the Windows installer-script command"
+              >
+                copy
+              </button>
+            </div>
+
+            <p>
+              PowerShell. Drops <code>manygit.exe</code> into
+              <code>%LocalAppData%\manygit\bin</code> and adds it to your PATH, with the same
+              self-update behavior as the script above. Already on Git Bash, MSYS2, Cygwin or
+              WSL? <code>install.sh</code> detects Windows there too and installs the same
+              binary.
             </p>
 
             <h3>With Go</h3>
@@ -601,7 +625,8 @@
                   <td>
                     Shell in the highlighted repo. Opens a prompt naming where you are —
                     <code>$manygit:apps/api-gateway</code>. Type a bash command —
-                    <i>git status -sb</i>, <i>npm test</i> — and it runs there, streaming
+                    <i>git status -sb</i>, <i>npm test</i> — and it runs there (falling back
+                    to <code>cmd.exe</code> on Windows if bash isn't on PATH), streaming
                     into the Output pane. The prompt stays open, so it is a shell you sit
                     in: run, read, run again. The bottom bar shows which repo you are in
                     while you type. <b>esc</b> leaves the shell and lands on Repos;
@@ -808,7 +833,8 @@
             </p>
             <p>
               <b>!</b> is the deliberate exception: it runs the bash command you type, in the
-              highlighted repo, with no confirm and no blocklist — a shell escape that
+              highlighted repo (falling back to <code>cmd.exe</code> on Windows if bash isn't
+              on PATH), with no confirm and no blocklist — a shell escape that
               second-guessed you would be useless. What it does instead is leave a record:
               the command is echoed into the Output pane with the repo it ran in, before any
               output arrives, and <b>ctrl+c</b> stops it mid-run.

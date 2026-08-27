@@ -1,5 +1,6 @@
-# Builds manygit for macOS + Linux (Intel & Apple Silicon) and publishes a
-# GitHub Release. Triggered by pushing a v* tag (see .github/workflows/release.yml).
+# Builds manygit for macOS, Linux and Windows (Intel & Apple/Arm silicon) and
+# publishes a GitHub Release. Triggered by pushing a v* tag (see
+# .github/workflows/release.yml).
 version: 2
 
 before:
@@ -15,6 +16,7 @@ builds:
     goos:
       - linux
       - darwin
+      - windows
     goarch:
       - amd64
       - arm64
@@ -23,6 +25,10 @@ builds:
 
 archives:
   - id: manygit
+    # Every OS ships the same tar.gz, windows included: Windows 10 1803+ and
+    # Windows 11 both bundle tar.exe, so install.ps1 and the self-updater can
+    # both just extract it — no second archive format to keep in sync. Inside
+    # a windows archive goreleaser names the binary manygit.exe automatically.
     formats: [tar.gz]
     # e.g. manygit_darwin_arm64.tar.gz — the installer and self-updater expect
     # exactly this name.
@@ -41,10 +47,11 @@ checksum:
 # loaded until the user trusts it. Nothing here can waive that — it is a decision
 # Homebrew reserves for the machine running the code.
 #
-# Casks are macOS-only by design; Linux installs through install.sh. Note the
-# cask points at the SAME archive install.sh downloads — there is no separate
-# brew build — which is why manygit works out who owns its binary at runtime
-# rather than from a build flag. See docs/adr/0001-runtime-install-ownership-detection.md.
+# Casks are macOS-only by design; Linux installs through install.sh, Windows
+# through install.ps1 (or install.sh under Git Bash/MSYS/WSL). Note the cask
+# points at the SAME archive install.sh downloads — there is no separate brew
+# build — which is why manygit works out who owns its binary at runtime rather
+# than from a build flag. See docs/adr/0001-runtime-install-ownership-detection.md.
 homebrew_casks:
   - name: manygit
     binaries:

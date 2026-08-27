@@ -1,5 +1,6 @@
 // Package config loads manygit settings with baked-in defaults. The config
-// file is optional and lives at $XDG_CONFIG_HOME/manygit/config.yml.
+// file is optional and lives at $XDG_CONFIG_HOME/manygit/config.yml (or, with
+// no XDG_CONFIG_HOME set, %AppData%\manygit\config.yml on Windows).
 package config
 
 import (
@@ -9,6 +10,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/rabeeh-ta/manygit/internal/discover"
+	"github.com/rabeeh-ta/manygit/internal/xdgdir"
 )
 
 // Config is the effective configuration.
@@ -35,17 +37,9 @@ func (c Config) UnicodeGlyphs() bool {
 	return c.StatusGlyphs != "ascii"
 }
 
-// ConfigPath returns the XDG config file path.
+// ConfigPath returns the config file path (see internal/xdgdir).
 func ConfigPath() string {
-	base := os.Getenv("XDG_CONFIG_HOME")
-	if base == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return filepath.Join(".config", "manygit", "config.yml")
-		}
-		base = filepath.Join(home, ".config")
-	}
-	return filepath.Join(base, "manygit", "config.yml")
+	return filepath.Join(xdgdir.ConfigHome(), "manygit", "config.yml")
 }
 
 // Load reads config from path (empty = ConfigPath()). A missing file yields
